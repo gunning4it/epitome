@@ -186,6 +186,11 @@ export default function HeroGraph() {
     };
   }, []);
 
+  // SSR-safe: D3 requires DOM, render empty container during server-side rendering
+  if (typeof window === 'undefined') {
+    return <div className="absolute inset-0 overflow-hidden pointer-events-none" />;
+  }
+
   return (
     <div ref={containerRef} className="absolute inset-0 overflow-hidden pointer-events-none">
       <svg ref={svgRef} className="w-full h-full opacity-30" />

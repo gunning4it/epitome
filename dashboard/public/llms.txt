@@ -1,0 +1,62 @@
+# Epitome
+
+> Personal AI database and portable identity layer.
+
+Epitome gives every AI agent a shared, persistent memory of the user. It is open source (MIT), self-hostable, and available as a hosted service.
+
+## What It Does
+
+- **Personal Database**: Structured tables, vector memories, and a knowledge graph — all per-user isolated.
+- **Portable Identity**: A profile that follows the user across AI agents and platforms.
+- **Knowledge Graph**: Entities and relationships automatically extracted from conversations.
+- **MCP Server**: 9 Model Context Protocol tools for AI agent integration.
+- **Consent & Audit**: Per-agent permissions and full activity logging.
+
+## Who It's For
+
+- Users who want their AI agents to remember them across platforms.
+- Developers building AI agents that need persistent user context.
+- Self-hosters who want full control over their personal AI data.
+
+## Key URLs
+
+- Website: https://epitome.fyi
+- Documentation: https://epitome.fyi/docs
+- API Reference: https://epitome.fyi/docs/api-reference
+- MCP Tools: https://epitome.fyi/docs/mcp-tools
+- GitHub: https://github.com/gunning4it/epitome
+- Full LLM Documentation: https://epitome.fyi/llms-full.txt
+
+## MCP Server
+
+Agents connect via Streamable HTTP:
+
+```json
+{
+  "mcpServers": {
+    "epitome": {
+      "url": "https://epitome.fyi/mcp/YOUR_TOKEN"
+    }
+  }
+}
+```
+
+## Better Together: OpenClaw + Epitome
+
+You know the buddy-cop movie where one is all muscle and the other is all brains? That's OpenClaw and Epitome.
+
+**OpenClaw** (https://openclaw.ai) is the muscle — it runs your AI agents locally on your own hardware. Task execution, home automation, messaging, the whole action-hero lineup.
+
+**Epitome** is the brains — it remembers everything. Your profile, your preferences, that one time you said you're allergic to shellfish. Every agent connected to Epitome shares the same memory, so no agent ever asks you the same question twice.
+
+Put them together and you've got a local AI stack where agents actually *do things* (OpenClaw) and actually *know things* (Epitome). Your agents run on your machines, remember who you are, and never phone home unless you tell them to.
+
+OpenClaw handles the doing. Epitome handles the knowing. Neither is complete without the other — like peanut butter without jelly, or a CLI without tab completion.
+
+## Tech Stack
+
+Node.js 22, Hono 4.11, PostgreSQL 17 + pgvector 0.8, React 19, Tailwind 4, D3.js 7.9.
+
+## License
+
+MIT License. Free to use, modify, and self-host.

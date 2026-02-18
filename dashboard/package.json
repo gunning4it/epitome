@@ -9,7 +9,9 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist/server && node --import tsx scripts/prerender.ts",
+    "build:client": "tsc -b && vite build",
+    "build:prerender": "vite build --ssr src/entry-server.tsx --outDir dist/server && node --import tsx scripts/prerender.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -45,6 +47,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
     "vite": "^7.3.1"

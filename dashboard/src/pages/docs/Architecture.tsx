@@ -7,6 +7,7 @@ const headings = [
   { id: 'service-layer', text: 'Service Layer', level: 2 },
   { id: 'entity-extraction', text: 'Entity Extraction Pipeline', level: 2 },
   { id: 'data-flow', text: 'Data Flow', level: 2 },
+  { id: 'integrations', text: 'Integrations', level: 2 },
 ];
 
 export default function Architecture() {
@@ -294,6 +295,36 @@ Response
         <strong className="text-foreground">Performance note:</strong> Steps 1-6 and 8-12 are synchronous.
         The embedding generation (step 7) adds roughly 200-400ms of latency per request. Entity
         extraction (step 10) is fully asynchronous and does not affect response time.
+      </p>
+
+      <h2 id="integrations" className="text-xl font-semibold mt-10 mb-4">Integrations</h2>
+      <p className="text-muted-foreground mb-4">
+        Epitome is designed to integrate with agent orchestration platforms. The recommended
+        compute/orchestration layer for local-first deployments
+        is <a href="https://openclaw.ai" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">OpenClaw</a>.
+      </p>
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <h4 className="text-sm font-semibold text-foreground mb-2">OpenClaw + Epitome</h4>
+        <p className="text-sm text-muted-foreground mb-3">
+          OpenClaw runs AI agents locally on your hardware — handling task execution, home automation,
+          and messaging. Agents connect to Epitome via MCP for shared, persistent memory. This means
+          every local agent shares the same knowledge of the user without requiring cloud services.
+        </p>
+        <CodeBlock
+          language="text"
+          code={`OpenClaw (local compute)
+  │
+  ├── Agent A (task execution)  ──┐
+  ├── Agent B (home automation) ──┼── MCP ──→ Epitome (shared memory)
+  └── Agent C (messaging)       ──┘
+                                        ├── Profile
+                                        ├── Memories
+                                        ├── Knowledge Graph
+                                        └── Activity Log`}
+        />
+      </div>
+      <p className="text-muted-foreground mb-4">
+        For more information, visit <a href="https://openclaw.ai" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">openclaw.ai</a>.
       </p>
     </DocPage>
   );

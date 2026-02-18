@@ -123,6 +123,15 @@ docker compose up -d
   https://epitome.fyi/mcp/YOUR_MCP_TOKEN`}
       />
 
+      <h3 className="text-lg font-medium mt-6 mb-3">OpenClaw</h3>
+      <p className="text-muted-foreground mb-3">
+        Running agents locally
+        with <a href="https://openclaw.ai" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">OpenClaw</a>?
+        Epitome works seamlessly as the shared memory layer — every local agent gets the same context.
+        See the <a href="/docs/architecture#integrations" className="text-blue-400 hover:underline">Architecture</a> page
+        for the full integration pattern.
+      </p>
+
       <h3 className="text-lg font-medium mt-6 mb-3">Self-hosted</h3>
       <p className="text-muted-foreground mb-3">
         For self-hosted instances, replace the URL with your local server and use an API key for authentication:

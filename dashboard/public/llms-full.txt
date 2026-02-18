@@ -1,0 +1,294 @@
+# Epitome — Full Documentation for LLMs
+
+> Personal AI database, portable identity layer, and knowledge graph that gives every AI agent a shared, persistent memory of the user.
+
+Website: https://epitome.fyi
+GitHub: https://github.com/gunning4it/epitome
+License: MIT
+
+---
+
+## Overview
+
+Epitome is the memory layer for AI agents. When an agent connects to Epitome, it gains access to everything the user has shared across all their AI interactions: profile data, stored memories, structured tables, and a knowledge graph of people, places, and concepts in the user's life.
+
+### Key Capabilities
+
+1. **Personal Profile**: A structured JSONB document containing the user's name, preferences, family, work, health info, and more. Updated incrementally by agents.
+2. **Vector Memories**: Semantic search over stored facts and experiences. Embedded with text-embedding-3-small.
+3. **Structured Tables**: User-defined relational tables (reading lists, habit logs, project trackers) with typed columns.
+4. **Knowledge Graph**: Entities (people, places, organizations, concepts) and edges (relationships) automatically extracted from conversations.
+5. **Consent System**: Per-agent, per-resource permissions. Users control exactly what each agent can read and write.
+6. **Activity Log**: Full audit trail of every agent action.
+
+---
+
+## Quick Start
+
+### Hosted (epitome.fyi)
+
+1. Sign in at epitome.fyi with GitHub or Google
+2. Copy your MCP URL from Settings
+3. Add to your AI agent's MCP config
+
+### Self-Hosted (Docker)
+
+```bash
+git clone https://github.com/gunning4it/epitome.git
+cd epitome
+cp .env.example .env
+# Edit .env with DATABASE_URL, JWT_SECRET, OPENAI_API_KEY
+docker compose up -d
+```
+
+API: http://localhost:3000 | Dashboard: http://localhost:5173
+
+---
+
+## MCP Server — 9 Tools
+
+Epitome implements the Model Context Protocol (MCP) via Streamable HTTP transport.
+
+### Connection
+
+```json
+{
+  "mcpServers": {
+    "epitome": {
+      "url": "https://epitome.fyi/mcp/YOUR_MCP_TOKEN"
+    }
+  }
+}
+```
+
+### Tools
+
+#### read_profile
+Read the user's personal profile. Call at the start of every conversation.
+- Returns: JSONB profile with name, preferences, family, work, health, etc.
+
+#### update_profile
+Merge updates into the user's profile. Uses JSONB deep merge — only changed fields are updated.
+- Parameters: `data` (object) — fields to merge
+
+#### store_memory
+Store a fact, experience, or observation. Automatically embedded and indexed.
+- Parameters: `content` (string), `collection` (string), `metadata` (object, optional)
+- Side effect: Triggers async entity extraction for knowledge graph
+
+#### search_memory
+Semantic vector search over stored memories.
+- Parameters: `query` (string), `collection` (string, optional), `limit` (number, optional)
+- Returns: Ranked results with similarity scores
+
+#### query_table
+Query a user-defined structured table.
+- Parameters: `table_name` (string), `filters` (object, optional), `limit` (number, optional)
+- Returns: Matching rows
+
+#### insert_record
+Insert a row into a user-defined table.
+- Parameters: `table_name` (string), `data` (object)
+
+#### query_graph
+Query the knowledge graph with optional filters.
+- Parameters: `entity_types` (string[], optional), `min_confidence` (number, optional), `limit` (number, optional)
+- Returns: Entities and edges
+
+#### get_entity_neighbors
+Get all entities connected to a specific entity.
+- Parameters: `entity_id` (string), `depth` (number, optional, default 1)
+- Returns: Connected entities and relationship edges
+
+#### log_activity
+Log a significant action for the audit trail.
+- Parameters: `action` (string), `resource_type` (string), `resource_id` (string), `details` (object, optional)
+
+---
+
+## REST API — 22 Endpoints
+
+Base URL: `https://epitome.fyi/v1` (hosted) or `http://localhost:3000/v1` (self-hosted)
+
+### Authentication
+- Session auth (dashboard): Cookie-based, set via OAuth flow
+- API key auth (programmatic): `Authorization: Bearer YOUR_API_KEY` header
+
+### Profile
+- `GET /v1/profile` — Read profile
+- `PATCH /v1/profile` — Merge-update profile
+
+### Vectors (Memories)
+- `GET /v1/vectors/:collection` — List memories in collection
+- `POST /v1/vectors/:collection` — Store a memory
+- `POST /v1/vectors/search` — Semantic search
+- `DELETE /v1/vectors/:collection/:id` — Delete a memory
+
+### Tables
+- `GET /v1/tables` — List user tables
+- `POST /v1/tables` — Create table with schema
+- `GET /v1/tables/:name` — Query table rows
+- `POST /v1/tables/:name` — Insert row
+- `DELETE /v1/tables/:name/:id` — Delete row
+- `DELETE /v1/tables/:name` — Drop table
+
+### Graph
+- `GET /v1/graph/entities` — List entities
+- `GET /v1/graph/entities/:id` — Get entity details
+- `GET /v1/graph/entities/:id/neighbors` — Get connected entities
+- `GET /v1/graph/edges` — List edges
+- `GET /v1/graph/stats` — Graph statistics
+- `POST /v1/graph/query` — Advanced graph query
+
+### Activity
+- `GET /v1/activity` — Activity log with pagination
+- `POST /v1/activity` — Log an activity
+
+### Agents
+- `GET /v1/agents` — List registered agents with consent status
+- `DELETE /v1/agents/:id` — Revoke agent access
+
+---
+
+## Data Model Summary
+
+### Per-User Schema Tables
+
+Each user gets an isolated PostgreSQL schema containing:
+
+- **profile**: JSONB document (single row, versioned)
+- **vector_entries**: Embedded memories with pgvector (collection, text, embedding, confidence, status)
+- **user_tables**: Dynamic structured tables (name, columns JSONB, row_count)
+- **user_table_rows**: Rows for user-defined tables (table_id, data JSONB)
+- **entities**: Knowledge graph nodes (name, type, properties, mention_count, confidence)
+- **edges**: Knowledge graph relationships (source_id, target_id, relation, weight, properties)
+- **entity_mentions**: Links entities to source vector entries
+- **activity_log**: Audit trail (agent_id, action, resource_type, resource_id, details)
+
+### Shared Schema Tables
+
+- **users**: User accounts (id, email, name)
+- **accounts**: OAuth provider links
+- **sessions**: Active sessions
+- **api_keys**: Agent API keys (hashed)
+- **agent_consent**: Per-agent, per-resource permissions
+
+---
+
+## Architecture
+
+- **Runtime**: Node.js 22 + Hono 4.11 (single server process)
+- **Database**: PostgreSQL 17 + pgvector 0.8
+- **Data Isolation**: Per-user PostgreSQL schemas (not RLS)
+- **MCP Transport**: Streamable HTTP
+- **AI Models**: OpenAI gpt-5-mini (extraction), text-embedding-3-small (embeddings)
+- **Dashboard**: React 19 + Tailwind 4 + D3.js 7.9
+
+---
+
+## System Prompt Template
+
+Include this in your agent's system prompt:
+
+```
+You have access to Epitome, the user's personal AI database. Use it to:
+
+1. READ the user's profile at the start of every conversation with read_profile.
+2. STORE important facts using store_memory with a descriptive collection name.
+3. SEARCH past memories with search_memory before making recommendations.
+4. QUERY structured data with query_table for organized information.
+5. INSERT records with insert_record for table-format tracking.
+6. EXPLORE the knowledge graph with query_graph and get_entity_neighbors.
+7. LOG significant actions with log_activity for the audit trail.
+
+Guidelines:
+- Always read the profile first in a new conversation.
+- Store memories proactively when the user shares personal information.
+- Search memories before giving personalized advice.
+- Never fabricate information — if you don't know, search first.
+```
+
+---
+
+## Self-Hosting Guide
+
+### Requirements
+- Node.js 22+
+- PostgreSQL 17 with pgvector 0.8+
+- OpenAI API key (for embeddings and entity extraction)
+
+### Docker Compose (Recommended)
+
+```bash
+git clone https://github.com/gunning4it/epitome.git
+cd epitome
+cp .env.example .env
+docker compose up -d
+```
+
+### Manual Setup
+
+```bash
+# Install API dependencies
+cd api && npm install
+
+# Run database migrations
+npm run db:push
+
+# Start the API server
+npm run dev
+
+# In another terminal, start the dashboard
+cd dashboard && npm install && npm run dev
+```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| DATABASE_URL | Yes | PostgreSQL connection string |
+| JWT_SECRET | Yes | Secret for signing session tokens |
+| OPENAI_API_KEY | Yes | OpenAI API key for embeddings + extraction |
+| OPENAI_MODEL | No | Model for extraction (default: gpt-5-mini) |
+| OPENAI_EMBEDDING_MODEL | No | Embedding model (default: text-embedding-3-small) |
+| PORT | No | API server port (default: 3000) |
+
+---
+
+## Security Model
+
+- **Schema Isolation**: Each user's data lives in a dedicated PostgreSQL schema. No cross-schema access.
+- **Consent System**: Agents must have explicit permission for each resource type (profile, vectors, graph, tables, activity). Hierarchical matching: consent for `graph` covers `graph/stats`, `graph/query`, etc.
+- **API Key Security**: Keys are Argon2-hashed before storage. Only the prefix is stored in plaintext for identification.
+- **SQL Sandbox**: User-defined table queries are validated and parameterized. No raw SQL execution.
+- **Audit Logging**: Every agent action is recorded with timestamp, agent ID, resource type, and details.
+- **Rate Limiting**: Per-agent request quotas prevent abuse.
+
+---
+
+## Integration: OpenClaw
+
+[OpenClaw](https://openclaw.ai) is a complementary system for local AI agent compute and orchestration.
+
+- **OpenClaw** handles what your agents *do*: task execution, home automation, local compute.
+- **Epitome** handles what they *know*: persistent memory, identity, knowledge graph.
+
+For local-first deployments, agents run on OpenClaw and connect to Epitome via MCP for shared memory. This gives every local agent the same context without cloud dependencies.
+
+```
+OpenClaw (local compute) → MCP → Epitome (memory layer)
+```
+
+---
+
+## Links
+
+- Website: https://epitome.fyi
+- Documentation: https://epitome.fyi/docs
+- Quick Start: https://epitome.fyi/docs/quick-start
+- MCP Tools Reference: https://epitome.fyi/docs/mcp-tools
+- API Reference: https://epitome.fyi/docs/api-reference
+- Self-Hosting: https://epitome.fyi/docs/self-hosting
+- Architecture: https://epitome.fyi/docs/architecture
+- GitHub: https://github.com/gunning4it/epitome
+- OpenClaw: https://openclaw.ai
