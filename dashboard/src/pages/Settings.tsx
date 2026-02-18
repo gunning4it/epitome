@@ -142,8 +142,10 @@ export default function Settings() {
                     </Badge>
                   </div>
                 </div>
-                <Button variant="link" className="text-sm">
-                  Upgrade to Pro
+                <Button variant="link" className="text-sm" asChild>
+                  <a href="/billing">
+                    {session?.tier === 'pro' ? 'Manage subscription' : 'Upgrade to Pro'}
+                  </a>
                 </Button>
               </div>
             </div>

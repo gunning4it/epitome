@@ -7,6 +7,7 @@
 
 import { Context, Next, MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
+import { TierLimitError } from '@/errors/tierLimit';
 import { logger } from '@/utils/logger';
 
 /**
@@ -55,6 +56,19 @@ export const errorHandler: MiddlewareHandler = async (c: Context, next: Next) =>
           },
         },
         400
+      );
+    }
+
+    // Handle tier limit errors → 402 Payment Required
+    if (error instanceof TierLimitError) {
+      return c.json<ErrorResponse>(
+        {
+          error: {
+            code: error.code,
+            message: error.message,
+          },
+        },
+        402
       );
     }
 

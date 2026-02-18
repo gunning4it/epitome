@@ -14,6 +14,7 @@ import { withUserSchema, sql as pgSql } from '@/db/client';
 import { createEntity, createEdge, getEntityByName, type CreateEntityInput, type CreateEdgeInput, type EntityType } from './graphService';
 import { checkAndDeduplicateBeforeCreate, type EntityCandidate } from './deduplication';
 import { getLatestProfile } from './profile.service';
+import { softCheckLimit } from './metering.service';
 import { logger } from '@/utils/logger';
 
 // =====================================================
@@ -1756,7 +1757,8 @@ export async function extractEntitiesFromRecord(
   userId: string,
   tableName: string,
   record: Record<string, any>,
-  method: ExtractionMethod = 'rule_based'
+  method: ExtractionMethod = 'rule_based',
+  tier?: string
 ): Promise<ExtractionResult> {
   let entities: ExtractedEntity[] = [];
   let methodUsed: ExtractionResult['method'] = method;
@@ -1790,6 +1792,40 @@ export async function extractEntitiesFromRecord(
   }
 
   entities = sanitizeExtractedEntities(entities);
+
+  // Soft limit check for graph entities (skip extraction if over limit, don't fail the write)
+  if (tier) {
+    const { exceeded, current, limit } = await softCheckLimit(userId, tier, 'graphEntities');
+    if (exceeded) {
+      logger.info('Entity extraction skipped: graph entity limit exceeded', {
+        userId, current, limit, skippedEntities: entities.map(e => e.name),
+      });
+      // Emit audit event for observability
+      try {
+        await withUserSchema(userId, async (tx) => {
+          await tx.unsafe(
+            `INSERT INTO audit_log (agent_id, action, resource, details, created_at)
+             VALUES ($1, $2, $3, $4, NOW())`,
+            [
+              'system',
+              'write',
+              'graph_entities',
+              JSON.stringify({
+                action: 'entity_extraction_skipped',
+                reason: 'tier_limit_exceeded',
+                current,
+                limit,
+                skipped_entities: entities.map(e => ({ name: e.name, type: e.type })),
+              }),
+            ]
+          );
+        });
+      } catch (auditErr) {
+        logger.warn('Failed to log extraction skip audit event', { error: String(auditErr) });
+      }
+      return { entities: [], method: methodUsed };
+    }
+  }
 
   // Create entities in the graph and collect refs for inter-entity edges
   const createdEntityRefs: CreatedEntityRef[] = [];

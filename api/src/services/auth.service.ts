@@ -16,6 +16,8 @@ import { OAuthProvider } from '@/validators/auth';
 import { logger } from '@/utils/logger';
 import { initializeProfile } from '@/services/profile.service';
 import { grantConsent } from '@/services/consent.service';
+import { TierLimitError } from '@/errors/tierLimit';
+import { getTierLimits } from './metering.service';
 
 /**
  * OAuth user profile from provider
@@ -252,7 +254,8 @@ export async function createApiKeyForUser(
   label: string,
   agentId: string | null = null,
   scopes: string[] = ['read', 'write'],
-  expiresInDays?: number
+  expiresInDays?: number,
+  tier: string = 'free'
 ): Promise<ApiKey> {
   // Generate API key (stored as SHA-256 hash for high-entropy token lookup)
   const { key, prefix, hash } = await generateApiKey(userId);
@@ -261,6 +264,24 @@ export async function createApiKeyForUser(
   const expiresAt = expiresInDays
     ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000)
     : null;
+
+  // Enforce agent limit for agent-specific keys
+  if (agentId) {
+    const limits = await getTierLimits((tier || 'free') as 'free' | 'pro' | 'enterprise');
+    if (limits.maxAgents !== -1) {
+      const countRows = await pgSql`
+        SELECT COUNT(DISTINCT agent_id)::int AS count
+        FROM public.api_keys
+        WHERE user_id = ${userId}
+          AND agent_id IS NOT NULL
+          AND revoked_at IS NULL
+      `;
+      const current = countRows[0]?.count ?? 0;
+      if (current >= limits.maxAgents) {
+        throw new TierLimitError('agents', current, limits.maxAgents);
+      }
+    }
+  }
 
   // Insert into database
   const [apiKey] = await db

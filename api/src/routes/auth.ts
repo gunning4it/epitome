@@ -40,6 +40,7 @@ import { db } from '@/db/client';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from '@/utils/logger';
+import { getSubscription } from '@/services/stripe.service';
 
 /**
  * C-2 SECURITY FIX: Validate redirect URLs against an allowlist
@@ -255,12 +256,16 @@ auth.get('/session', requireAuth, async (c) => {
     );
   }
 
+  // Fetch subscription data
+  const subscription = await getSubscription(userId);
+
   return c.json({
     user_id: user.id,
     email: user.email,
     name: user.name,
     tier: user.tier,
     onboarded: user.onboarded,
+    subscription: subscription || null,
   });
 });
 

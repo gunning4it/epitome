@@ -22,6 +22,8 @@ import memoryRoutes from '@/routes/memory';
 import activityRoutes from '@/routes/activity';
 import graphRoutes from '@/routes/graph';
 import consentRoutes from '@/routes/consent';
+import webhookRoutes from '@/routes/webhooks';
+import billingRoutes from '@/routes/billing';
 import { createMcpRoutes } from '@/mcp/handler';
 import {
   oauthDiscovery,
@@ -35,11 +37,16 @@ import { closeDatabase } from '@/db/client';
 import { startEnrichmentWorkers, stopEnrichmentWorkers } from '@/services/enrichmentQueue.service';
 import { scheduleNightlyExtraction } from '@/services/entityExtraction';
 import { startMemoryDecayScheduler, stopMemoryDecayScheduler } from '@/services/memoryQuality.service';
+import { TierLimitError } from '@/errors/tierLimit';
+import { startMeteringFlush, stopMeteringFlush } from '@/services/metering.service';
 import { logger } from '@/utils/logger';
 import type { HonoEnv } from '@/types/hono';
 
 // Initialize Hono app
 const app = new Hono<HonoEnv>();
+
+// *** Webhook route BEFORE global middleware — no auth needed ***
+app.route('/webhooks', webhookRoutes);
 
 // Global middleware chain
 app.use('*', securityHeaders);
@@ -67,6 +74,7 @@ app.route('/v1/vectors', vectorsRoutes);
 app.route('/v1/memory', memoryRoutes);
 app.route('/v1/graph', graphRoutes);
 app.route('/v1/consent', consentRoutes);
+app.route('/v1/billing', billingRoutes);
 app.route('/v1', activityRoutes); // Activity routes include /v1/activity and /v1/export
 
 // Mount MCP server
@@ -85,6 +93,20 @@ const verboseErrors = process.env.NODE_ENV === 'development' || process.env.NODE
 
 // Global error handler (catches errors that escape middleware)
 app.onError((error, c) => {
+  // Handle tier limit errors → 402 Payment Required
+  if (error instanceof TierLimitError) {
+    return c.json({
+      error: {
+        code: error.code,
+        message: error.message,
+        resource: error.resource,
+        current: error.current,
+        limit: error.limit,
+        upgrade_url: '/billing',
+      },
+    }, 402);
+  }
+
   // Handle SQL Sandbox errors
   if (error.message.includes('SQL_SANDBOX_ERROR')) {
     return c.json(
@@ -163,6 +185,7 @@ if (process.env.NODE_ENV !== 'test') {
 
   startEnrichmentWorkers();
   startMemoryDecayScheduler();
+  startMeteringFlush();
 
   if (process.env.ENABLE_NIGHTLY_EXTRACTION === 'true') {
     scheduleNightlyExtraction().catch((error) => {
@@ -189,6 +212,7 @@ if (process.env.NODE_ENV !== 'test') {
       logger.info('HTTP server closed, draining connections');
       stopEnrichmentWorkers();
       stopMemoryDecayScheduler();
+      stopMeteringFlush();
       closeDatabase().then(() => {
         logger.info('Database connections closed');
         process.exit(0);
