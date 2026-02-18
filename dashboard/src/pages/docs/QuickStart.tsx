@@ -65,7 +65,7 @@ export default function QuickStart() {
       <CodeBlock
         language="bash"
         code={`# Clone the repository
-git clone https://github.com/nickarino/epitome.git
+git clone https://github.com/gunning4it/epitome.git
 cd epitome
 
 # Copy and configure environment variables

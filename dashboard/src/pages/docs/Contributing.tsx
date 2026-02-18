@@ -25,7 +25,7 @@ export default function Contributing() {
       <CodeBlock
         language="bash"
         code={`# Clone the repository
-git clone https://github.com/nickarino/epitome.git
+git clone https://github.com/gunning4it/epitome.git
 cd epitome
 
 # Install API dependencies
