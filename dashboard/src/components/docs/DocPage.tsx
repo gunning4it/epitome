@@ -51,7 +51,7 @@ export default function DocPage({
         title={seoTitle}
         description={description}
         path={location.pathname}
-        image="/og-docs.png"
+        image="/og-image.png"
       />
       <article className="flex-1 min-w-0 max-w-3xl py-8 px-6">
         <div className="flex items-start justify-between gap-4 mb-2">
