@@ -374,8 +374,16 @@ jobs:
 
       - name: Verify deployment
         run: |
-          for i in 1 2 3 4 5; do
-            curl -sf https://api.epitome.fyi/health && exit 0
+          echo "Waiting 30s for machines to settle after deploy..."
+          sleep 30
+          for i in 1 2 3 4 5 6; do
+            echo "Health check attempt $i..."
+            if curl -sf -m 10 https://api.epitome.fyi/health; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 15s..."
             sleep 15
           done
+          echo "Health check failed after all retries"
           exit 1
