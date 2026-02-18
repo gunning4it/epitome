@@ -223,6 +223,12 @@ export interface SessionData {
   name: string | null;
   tier: string;
   onboarded: boolean;
+  subscription: {
+    status: string;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+    stripePriceId: string | null;
+  } | null;
 }
 
 export const authApi = {
@@ -237,6 +243,40 @@ export const authApi = {
     }),
   revokeApiKey: (id: string) =>
     apiCall('/auth/api-keys/' + id, { method: 'DELETE' }),
+};
+
+// Billing API
+export interface BillingUsage {
+  current: { tables: number; agents: number; graphEntities: number };
+  limits: { maxTables: number; maxAgents: number; maxGraphEntities: number };
+  history: Array<{ resource: string; date: string; count: number; agentId: string | null }>;
+}
+
+export interface BillingTransaction {
+  id: string;
+  paymentType: 'stripe' | 'x402';
+  amountMicros: number;
+  currency: string;
+  asset: string | null;
+  status: string;
+  description: string | null;
+  stripeInvoiceId: string | null;
+  x402TxHash: string | null;
+  x402Network: string | null;
+  createdAt: string;
+}
+
+export const billingApi = {
+  usage: () => apiCall<BillingUsage>('/billing/usage'),
+  subscription: () =>
+    apiCall<{ subscription: SessionData['subscription'] }>('/billing/subscription').then((r) => r.subscription),
+  checkout: () => apiCall<{ url: string }>('/billing/checkout', { method: 'POST' }),
+  portal: () => apiCall<{ url: string }>('/billing/portal', { method: 'POST' }),
+  transactions: (params?: { limit?: number; offset?: number }) =>
+    apiCall<{ data: BillingTransaction[]; meta: { total: number; limit: number; offset: number } }>(
+      '/billing/transactions',
+      { params: params as Record<string, string | number | boolean> | undefined }
+    ),
 };
 
 export { apiCall };

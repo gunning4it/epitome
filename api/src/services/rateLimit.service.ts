@@ -145,7 +145,7 @@ export async function consumeRateLimit(
 export function determineRateLimitTier(authContext: {
   isAuthenticated: boolean;
   authType?: 'session' | 'api_key';
-  apiKeyTier?: 'free' | 'pro';
+  apiKeyTier?: 'free' | 'pro' | 'enterprise';
   isMcpTool?: boolean;
 }): RateLimitTier {
   if (!authContext.isAuthenticated) {
@@ -161,7 +161,7 @@ export function determineRateLimitTier(authContext: {
   }
 
   if (authContext.authType === 'api_key') {
-    return authContext.apiKeyTier === 'pro'
+    return authContext.apiKeyTier === 'pro' || authContext.apiKeyTier === 'enterprise'
       ? RateLimitTier.API_KEY_PRO
       : RateLimitTier.API_KEY_FREE;
   }

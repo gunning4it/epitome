@@ -13,6 +13,7 @@
 
 import { withUserSchema, TransactionSql } from '@/db/client';
 import { validateTableName, validateColumnName, escapeIdentifier } from './sqlSandbox.service';
+import { withTierLimitLock } from './metering.service';
 import {
   createMemoryMetaInternal,
   recordAccessInternal,
@@ -149,11 +150,12 @@ export async function createTable(
   userId: string,
   tableName: string,
   description?: string,
-  initialColumns: ColumnMetadata[] = []
+  initialColumns: ColumnMetadata[] = [],
+  tier: string = 'free'
 ): Promise<void> {
   validateTableName(tableName);
 
-  await withUserSchema(userId, async (tx) => {
+  await withTierLimitLock(userId, tier, 'tables', async (tx) => {
     // Build column definitions
     const columnDefs = initialColumns
       .map((col) => {
@@ -277,26 +279,25 @@ export async function insertRecord(
   data: Record<string, unknown>,
   changedBy: string = 'user',
   origin: string = 'user_typed',
-  tableDescription?: string
+  tableDescription?: string,
+  tier: string = 'free'
 ): Promise<number> {
   validateTableName(tableName);
   assertWritable(tableName);
 
-  return await withUserSchema(userId, async (tx) => {
-    // Check if table exists - need to do this check within the transaction
-    const rows = await tx.unsafe(
-      `
-      SELECT EXISTS (
-        SELECT 1
-        FROM _table_registry
-        WHERE table_name = $1
-      ) as exists
-    `,
-      [tableName]
-    );
-    const exists = rows[0]?.exists || false;
+  // Check if table exists before entering the main transaction
+  const exists = await tableExists(userId, tableName);
 
-    if (!exists) {
+  if (!exists) {
+    // Atomically check table limit + create table
+    await withTierLimitLock(userId, tier, 'tables', async (tx) => {
+      // Double-check inside lock (another request may have created it)
+      const innerCheck = await tx.unsafe(
+        `SELECT EXISTS (SELECT 1 FROM _table_registry WHERE table_name = $1) as exists`,
+        [tableName]
+      );
+      if (innerCheck[0]?.exists) return; // Already created by concurrent request
+
       // Auto-create table with inferred columns
       const columns = Object.entries(data).map(([name, value]) => ({
         name,
@@ -304,7 +305,6 @@ export async function insertRecord(
         nullable: true,
       }));
 
-      // Build column definitions
       const columnDefs = columns
         .map((col) => {
           validateColumnName(col.name);
@@ -313,7 +313,6 @@ export async function insertRecord(
         })
         .join(',\n  ');
 
-      // Create table with standard columns
       const createTableSql = `
         CREATE TABLE ${escapeIdentifier(tableName)} (
           id SERIAL PRIMARY KEY,
@@ -324,30 +323,17 @@ export async function insertRecord(
           _meta_id INTEGER REFERENCES memory_meta(id)
         )
       `;
-
       await tx.unsafe(createTableSql);
 
-      // Create index on _deleted_at for soft delete queries
       await tx.unsafe(
         `CREATE INDEX ${escapeIdentifier(`idx_${tableName}_deleted`)}
          ON ${escapeIdentifier(tableName)}(_deleted_at)
          WHERE _deleted_at IS NULL`
       );
 
-      // Register table in _table_registry
       await tx.unsafe(
-        `
-        INSERT INTO _table_registry (
-          table_name,
-          description,
-          columns,
-          record_count,
-          created_at,
-          updated_at
-        ) VALUES (
-          $1, $2, $3, 0, NOW(), NOW()
-        )
-      `,
+        `INSERT INTO _table_registry (table_name, description, columns, record_count, created_at, updated_at)
+         VALUES ($1, $2, $3, 0, NOW(), NOW())`,
         [
           tableName,
           tableDescription || null,
@@ -362,16 +348,18 @@ export async function insertRecord(
           ),
         ]
       );
-    } else {
-      // Check for new columns
-      const existingCols = await getTableColumns(tx, tableName);
-      const existingNames = existingCols.map((c) => c.name);
+    });
+  }
 
-      for (const [colName, value] of Object.entries(data)) {
-        if (!existingNames.includes(colName)) {
-          // Auto-add column
-          await addColumn(tableName, colName, inferSqlType(value), tx);
-        }
+  return await withUserSchema(userId, async (tx) => {
+    // Check for new columns (table was either pre-existing or just created above)
+    const existingCols = await getTableColumns(tx, tableName);
+    const existingNames = existingCols.map((c) => c.name);
+
+    for (const [colName, value] of Object.entries(data)) {
+      if (!existingNames.includes(colName)) {
+        // Auto-add column
+        await addColumn(tableName, colName, inferSqlType(value), tx);
       }
     }
 

@@ -19,6 +19,7 @@ const Graph = lazy(() => import('@/pages/Graph'));
 const Review = lazy(() => import('@/pages/Review'));
 const Activity = lazy(() => import('@/pages/Activity'));
 const Agents = lazy(() => import('@/pages/Agents'));
+const Billing = lazy(() => import('@/pages/Billing'));
 const Settings = lazy(() => import('@/pages/Settings'));
 
 // Docs pages — lazy loaded
@@ -104,6 +105,7 @@ export default function AppRoutes() {
         <Route path="/review" element={<Review />} />
         <Route path="/activity" element={<Activity />} />
         <Route path="/agents" element={<Agents />} />
+        <Route path="/billing" element={<Billing />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>

@@ -12,6 +12,7 @@ export type HonoEnv = {
     userId?: string;
     agentId?: string;
     authType?: 'session' | 'api_key';
-    tier?: 'free' | 'pro';
+    tier?: 'free' | 'pro' | 'enterprise';
+    x402Paid?: boolean;
   };
 };

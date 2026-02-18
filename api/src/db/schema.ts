@@ -620,3 +620,117 @@ export type VectorCollection = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+// =====================================================
+// BILLING & METERING TABLES
+// =====================================================
+
+/**
+ * Stripe subscription state (one per user)
+ */
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    stripeCustomerId: varchar('stripe_customer_id', { length: 255 }).notNull(),
+    stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }).unique(),
+    stripePriceId: varchar('stripe_price_id', { length: 255 }),
+    status: varchar('status', { length: 30 })
+      .notNull()
+      .default('incomplete')
+      .$type<'incomplete' | 'incomplete_expired' | 'trialing' | 'active' | 'past_due' | 'canceled' | 'unpaid' | 'paused'>(),
+    currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
+    canceledAt: timestamp('canceled_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdx: index('idx_subscriptions_user').on(table.userId),
+    stripeCustIdx: index('idx_subscriptions_stripe_cust').on(table.stripeCustomerId),
+  })
+);
+
+/**
+ * Stripe webhook idempotency (dedup by event ID)
+ */
+export const stripeEvents = pgTable(
+  'stripe_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    eventId: varchar('event_id', { length: 255 }).notNull().unique(),
+    eventType: varchar('event_type', { length: 100 }).notNull(),
+    processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    processedIdx: index('idx_stripe_events_processed').on(table.processedAt),
+  })
+);
+
+/**
+ * Daily usage snapshots (powers dashboard charts + per-agent breakdown)
+ */
+export const usageRecords = pgTable(
+  'usage_records',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    resource: varchar('resource', { length: 50 })
+      .notNull()
+      .$type<'tables' | 'agents' | 'graph_entities' | 'api_calls' | 'mcp_calls'>(),
+    count: integer('count').notNull().default(0),
+    periodDate: timestamp('period_date', { mode: 'date' }).notNull().defaultNow(),
+    agentId: varchar('agent_id', { length: 100 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userDateIdx: index('idx_usage_user_date').on(table.userId, table.periodDate),
+  })
+);
+
+/**
+ * Unified payment records (Stripe invoices + x402 crypto)
+ */
+export const billingTransactions = pgTable(
+  'billing_transactions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    paymentType: varchar('payment_type', { length: 20 })
+      .notNull()
+      .$type<'stripe' | 'x402'>(),
+    stripeInvoiceId: varchar('stripe_invoice_id', { length: 255 }),
+    stripePaymentIntentId: varchar('stripe_payment_intent_id', { length: 255 }),
+    x402TxHash: varchar('x402_tx_hash', { length: 100 }),
+    x402Network: varchar('x402_network', { length: 50 }),
+    amountMicros: bigint('amount_micros', { mode: 'number' }).notNull(),
+    currency: varchar('currency', { length: 10 }).notNull().default('usd'),
+    asset: varchar('asset', { length: 20 }),
+    status: varchar('status', { length: 20 })
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'succeeded' | 'failed' | 'refunded'>(),
+    description: varchar('description', { length: 500 }),
+    metadata: jsonb('metadata').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdx: index('idx_billing_tx_user').on(table.userId, table.createdAt),
+  })
+);
+
+// Billing type exports
+export type Subscription = typeof subscriptions.$inferSelect;
+export type NewSubscription = typeof subscriptions.$inferInsert;
+
+export type StripeEvent = typeof stripeEvents.$inferSelect;
+export type NewStripeEvent = typeof stripeEvents.$inferInsert;
+
+export type UsageRecord = typeof usageRecords.$inferSelect;
+export type NewUsageRecord = typeof usageRecords.$inferInsert;
+
+export type BillingTransaction = typeof billingTransactions.$inferSelect;
+export type NewBillingTransaction = typeof billingTransactions.$inferInsert;

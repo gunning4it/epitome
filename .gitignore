@@ -36,3 +36,6 @@ temp/
 
 # Supabase local
 supabase/.temp/
+
+# Git worktrees
+.worktrees/

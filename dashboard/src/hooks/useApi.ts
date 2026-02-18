@@ -13,6 +13,7 @@ import {
   activityApi,
   agentsApi,
   authApi,
+  billingApi,
 } from '@/lib/api-client';
 
 // Auth hooks
@@ -260,5 +261,40 @@ export function useRevokeAgent() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] });
     },
+  });
+}
+
+// Billing hooks
+export function useBillingUsage() {
+  return useQuery({
+    queryKey: ['billing', 'usage'],
+    queryFn: billingApi.usage,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useBillingSubscription() {
+  return useQuery({
+    queryKey: ['billing', 'subscription'],
+    queryFn: billingApi.subscription,
+  });
+}
+
+export function useCreateCheckout() {
+  return useMutation({
+    mutationFn: billingApi.checkout,
+  });
+}
+
+export function useCreatePortal() {
+  return useMutation({
+    mutationFn: billingApi.portal,
+  });
+}
+
+export function useBillingTransactions(params?: { limit?: number; offset?: number }) {
+  return useQuery({
+    queryKey: ['billing', 'transactions', params],
+    queryFn: () => billingApi.transactions(params),
   });
 }

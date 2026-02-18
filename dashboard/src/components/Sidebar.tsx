@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Activity,
   Bot,
+  CreditCard,
   Settings,
   LogOut,
   Menu,
@@ -28,6 +29,7 @@ const navItems = [
   { path: '/review', label: 'Review', icon: ShieldCheck },
   { path: '/activity', label: 'Activity', icon: Activity },
   { path: '/agents', label: 'Agents', icon: Bot },
+  { path: '/billing', label: 'Billing', icon: CreditCard },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
