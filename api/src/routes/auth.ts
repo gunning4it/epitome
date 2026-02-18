@@ -463,11 +463,30 @@ async function exchangeOAuthCode(
     });
 
     if (!response.ok) {
+      const errorBody = await response.text().catch(() => '(unreadable)');
+      logger.error('OAuth token exchange failed', {
+        provider,
+        status: response.status,
+        statusText: response.statusText,
+        body: errorBody,
+        redirectUri,
+      });
       return null;
     }
 
-    const data = await response.json() as OAuthTokenResponse;
-    return data;
+    const data = await response.json() as Record<string, unknown>;
+
+    // GitHub returns 200 even on errors — check for error field
+    if ('error' in data) {
+      logger.error('OAuth provider returned error in response body', {
+        provider,
+        error: data.error,
+        errorDescription: data.error_description,
+      });
+      return null;
+    }
+
+    return data as unknown as OAuthTokenResponse;
   } catch (error) {
     logger.error('Error exchanging OAuth code', { error: String(error) });
     return null;
