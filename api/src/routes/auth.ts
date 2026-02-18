@@ -168,14 +168,15 @@ auth.get('/callback', zValidator('query', callbackQuerySchema), async (c) => {
 
   // Set session cookie
   const sessionTtlDays = parseInt(process.env.SESSION_TTL_DAYS || '7');
-  // SameSite=None required because API and dashboard are on different fly.dev subdomains
-  // (fly.dev is on the Public Suffix List, so they're cross-site)
+  // When COOKIE_DOMAIN is set (e.g. .epitome.fyi), API and dashboard share eTLD+1 → use Lax
+  // Without it (staging on fly.dev PSL), they're cross-site → need None
   setCookie(c, 'epitome_session', session.token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+    sameSite: process.env.COOKIE_DOMAIN ? 'Lax' : (process.env.NODE_ENV === 'production' ? 'None' : 'Lax'),
     maxAge: sessionTtlDays * 24 * 60 * 60,
     path: '/',
+    domain: process.env.COOKIE_DOMAIN || undefined,
   });
 
   // Redirect after login
@@ -245,6 +246,7 @@ auth.post('/logout', requireAuth, async (c) => {
   // Clear session cookie
   deleteCookie(c, 'epitome_session', {
     path: '/',
+    domain: process.env.COOKIE_DOMAIN || undefined,
   });
 
   return c.json({
@@ -289,14 +291,13 @@ auth.post('/refresh', async (c) => {
 
   // Update session cookie
   const sessionTtlDays = parseInt(process.env.SESSION_TTL_DAYS || '7');
-  // SameSite=None required because API and dashboard are on different fly.dev subdomains
-  // (fly.dev is on the Public Suffix List, so they're cross-site)
   setCookie(c, 'epitome_session', session.token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+    sameSite: process.env.COOKIE_DOMAIN ? 'Lax' : (process.env.NODE_ENV === 'production' ? 'None' : 'Lax'),
     maxAge: sessionTtlDays * 24 * 60 * 60,
     path: '/',
+    domain: process.env.COOKIE_DOMAIN || undefined,
   });
 
   return c.json({
