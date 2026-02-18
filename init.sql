@@ -77,9 +77,8 @@ CREATE TABLE IF NOT EXISTS public.api_keys (
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON public.api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON public.api_keys(prefix);
--- Active keys only (for auth lookup)
-CREATE INDEX IF NOT EXISTS idx_api_keys_active ON public.api_keys(key_hash)
-  WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW());
+-- Do not use NOW()/non-IMMUTABLE functions in index predicates.
+-- key_hash has a UNIQUE index from table definition; active/expiry filtering stays in query logic.
 
 -- -----------------------------------------------------
 -- Table: public.sessions
@@ -96,8 +95,6 @@ CREATE TABLE IF NOT EXISTS public.sessions (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_sessions_token ON public.sessions(token)
-  WHERE expires_at > NOW();
 CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON public.sessions(token_hash);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON public.sessions(user_id);
 
@@ -256,6 +253,38 @@ CREATE INDEX IF NOT EXISTS idx_pending_vectors_sched
   ON public.pending_vectors(status, next_run_at, created_at);
 CREATE INDEX IF NOT EXISTS idx_pending_vectors_user
   ON public.pending_vectors(user_id, created_at DESC);
+
+-- =====================================================
+-- ROW LEVEL SECURITY (BLOCK SUPABASE DATA API ACCESS)
+-- =====================================================
+-- Epitome connects as `postgres` (superuser), which bypasses RLS.
+-- No permissive policies are created — this denies all non-superuser access.
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.oauth_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.oauth_clients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.oauth_authorization_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_registry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.system_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.enrichment_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pending_vectors ENABLE ROW LEVEL SECURITY;
+
+-- =====================================================
+-- REVOKE DATA API GRANTS
+-- =====================================================
+-- Epitome uses direct postgres connections, not the Supabase Data API.
+-- The anon/authenticated roles are only used by PostgREST (Data API).
+
+-- Revoke from existing tables
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon, authenticated;
+
+-- Prevent future tables from being auto-granted
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM anon, authenticated;
 
 -- =====================================================
 -- UTILITY FUNCTIONS (PUBLIC SCHEMA)

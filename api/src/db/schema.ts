@@ -122,9 +122,6 @@ export const apiKeys = pgTable(
   (table) => ({
     userIdx: index('idx_api_keys_user').on(table.userId),
     prefixIdx: index('idx_api_keys_prefix').on(table.prefix),
-    activeIdx: index('idx_api_keys_active')
-      .on(table.keyHash)
-      .where(sql`${table.revokedAt} IS NULL AND (${table.expiresAt} IS NULL OR ${table.expiresAt} > NOW())`),
   })
 );
 
@@ -146,12 +143,8 @@ export const sessions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    tokenIdx: index('idx_sessions_token')
-      .on(table.token)
-      .where(sql`${table.expiresAt} > NOW()`),
     tokenHashIdx: index('idx_sessions_token_hash') // H-1 Security Fix
-      .on(table.tokenHash)
-      .where(sql`${table.expiresAt} > NOW()`),
+      .on(table.tokenHash),
     userIdx: index('idx_sessions_user').on(table.userId),
   })
 );
