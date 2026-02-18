@@ -283,6 +283,10 @@ export async function createApiKeyForUser(
     }
   }
 
+  // Look up user's current tier so new keys inherit it
+  const [user] = await db.select({ tier: users.tier }).from(users).where(eq(users.id, userId)).limit(1);
+  const effectiveTier = user?.tier || tier || 'free';
+
   // Insert into database
   const [apiKey] = await db
     .insert(apiKeys)
@@ -294,6 +298,7 @@ export async function createApiKeyForUser(
       agentId,
       scopes,
       expiresAt,
+      tier: effectiveTier,
     })
     .returning();
 

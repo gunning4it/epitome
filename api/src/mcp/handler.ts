@@ -166,9 +166,14 @@ export function createMcpRoutes(): Hono<HonoEnv> {
         x402ServerInstance,
       );
 
-      // Wrap: if payment succeeds, set x402Paid on context
+      // Wrap: only set x402Paid if request actually included a payment header
+      // (paymentMiddleware calls next() both for "no-payment-required" AND
+      // "payment-verified" — we must distinguish between the two)
       await mw(c, async () => {
-        c.set('x402Paid', true);
+        const paymentHeader = c.req.header('payment-signature') || c.req.header('x-payment');
+        if (paymentHeader) {
+          c.set('x402Paid', true);
+        }
         await next();
       });
     } catch (err) {
