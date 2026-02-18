@@ -12,6 +12,7 @@ import {
   LogOut,
   Menu,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/hooks/useApi';
 import { authApi } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
@@ -33,10 +34,16 @@ const navItems = [
 function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { data: session } = useSession();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const handleLogout = async () => {
-    await authApi.logout();
-    navigate('/onboarding');
+    try {
+      await authApi.logout();
+    } catch {
+      // Sign out locally even if API call fails
+    }
+    queryClient.clear();
+    navigate('/');
   };
 
   return (
