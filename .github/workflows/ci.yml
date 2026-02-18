@@ -374,5 +374,8 @@ jobs:
 
       - name: Verify deployment
         run: |
-          sleep 10
-          curl -f https://api.epitome.fyi/health || exit 1
+          for i in 1 2 3 4 5; do
+            curl -sf https://api.epitome.fyi/health && exit 0
+            sleep 15
+          done
+          exit 1
