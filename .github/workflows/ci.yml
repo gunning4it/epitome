@@ -357,24 +357,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-artifacts
+      - name: Setup Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Deploy to Railway
+      - name: Deploy API
+        working-directory: ./api
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          npm install -g @railway/cli
-          railway up
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --app epitome-prod-api
+
+      - name: Deploy Dashboard
+        working-directory: ./dashboard
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --app epitome-prod-dashboard
 
       - name: Verify deployment
         run: |
+          sleep 10
           curl -f https://api.epitome.fyi/health || exit 1
-
-      - name: Notify deployment success
-        if: success()
-        run: |
-          echo "Deployment successful!"
-          # Add Slack/Discord notification here if desired
