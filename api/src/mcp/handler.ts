@@ -77,7 +77,7 @@ async function initX402Server() {
     const { registerExactEvmScheme } = await import('@x402/evm/exact/server');
 
     const facilitatorClient = new HTTPFacilitatorClient({
-      url: process.env.X402_FACILITATOR_URL || 'https://facilitator.x402.org',
+      url: process.env.X402_FACILITATOR_URL || 'https://x402.org/facilitator',
     });
     const server = new x402ResourceServer(facilitatorClient);
     registerExactEvmScheme(server);
