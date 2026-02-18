@@ -46,6 +46,7 @@
     "@hono/node-server": "^1.19.9",
     "@types/node": "^22.19.11",
     "@types/supertest": "^6.0.3",
+    "@vitest/coverage-v8": "^4.0.18",
     "supertest": "^7.2.2",
     "tsc-alias": "^1.8.16",
     "tsup": "^8.5.1",
