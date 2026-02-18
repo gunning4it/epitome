@@ -1,10 +1,12 @@
 /**
  * Cryptographic Utilities
  *
- * Functions for secure token generation, hashing, and validation
+ * Functions for secure token generation, hashing, encryption, and validation
  */
 
 import crypto from 'crypto';
+
+const ENCRYPTION_KEY_ENV = 'ENCRYPTION_KEY'; // 32-byte hex key (64 hex chars)
 import { logger } from '@/utils/logger';
 
 /**
@@ -148,11 +150,12 @@ export function verifyPkceS256(codeVerifier: string, codeChallenge: string): boo
 /**
  * Generate an OAuth state parameter
  *
- * Encodes provider and redirect_uri in a secure token
+ * C-1 SECURITY FIX: HMAC-SHA256 signs the payload so attackers cannot
+ * forge or tamper with the state parameter.
  *
  * @param provider - OAuth provider
  * @param redirectUri - Optional redirect URI
- * @returns Base64-encoded state token
+ * @returns HMAC-signed state token (payload.signature)
  */
 export function generateOAuthState(
   provider: string,
@@ -165,15 +168,24 @@ export function generateOAuthState(
     timestamp: Date.now(),
   };
 
-  return Buffer.from(JSON.stringify(stateData)).toString('base64');
+  const payload = Buffer.from(JSON.stringify(stateData)).toString('base64url');
+  const signature = crypto
+    .createHmac('sha256', process.env.SESSION_SECRET!)
+    .update(payload)
+    .digest('base64url');
+
+  return `${payload}.${signature}`;
 }
 
 /**
  * Decode and validate an OAuth state parameter
  *
- * @param state - Base64-encoded state token
+ * C-1 SECURITY FIX: Verifies HMAC-SHA256 signature with constant-time
+ * comparison before trusting the payload.
+ *
+ * @param state - HMAC-signed state token (payload.signature)
  * @returns Decoded state data
- * @throws Error if state is invalid or expired (>10 min)
+ * @throws Error if state is invalid, tampered, or expired (>10 min)
  */
 export function decodeOAuthState(state: string): {
   provider: string;
@@ -181,9 +193,28 @@ export function decodeOAuthState(state: string): {
   nonce: string;
   timestamp: number;
 } {
+  const [payload, signature] = state.split('.');
+  if (!payload || !signature) {
+    throw new Error('Invalid OAuth state format');
+  }
+
+  const expectedBuf = crypto
+    .createHmac('sha256', process.env.SESSION_SECRET!)
+    .update(payload)
+    .digest();
+  const signatureBuf = Buffer.from(signature, 'base64url');
+
+  if (
+    signatureBuf.length !== expectedBuf.length ||
+    !crypto.timingSafeEqual(signatureBuf, expectedBuf)
+  ) {
+    throw new Error('Invalid OAuth state signature');
+  }
+
   try {
-    const decoded = Buffer.from(state, 'base64').toString('utf-8');
-    const stateData = JSON.parse(decoded);
+    const stateData = JSON.parse(
+      Buffer.from(payload, 'base64url').toString('utf-8')
+    );
 
     // Validate state is not older than 10 minutes
     const age = Date.now() - stateData.timestamp;
@@ -197,4 +228,78 @@ export function decodeOAuthState(state: string): {
       `Invalid OAuth state: ${error instanceof Error ? error.message : 'unknown error'}`
     );
   }
+}
+
+// ─── AES-256-GCM Encryption (H-3 Security Fix) ─────────────────────
+
+/**
+ * Encrypt a plaintext string using AES-256-GCM
+ *
+ * H-3 SECURITY FIX: Encrypts OAuth provider tokens (access_token,
+ * refresh_token) before storage in the database.
+ *
+ * Format: iv.authTag.ciphertext (all base64)
+ *
+ * @param plaintext - String to encrypt
+ * @returns Encrypted string in iv.authTag.ciphertext format
+ * @throws Error if ENCRYPTION_KEY is not configured or invalid
+ */
+export function encrypt(plaintext: string): string {
+  const key = process.env[ENCRYPTION_KEY_ENV];
+  if (!key) throw new Error('ENCRYPTION_KEY not configured');
+  const keyBuf = Buffer.from(key, 'hex');
+  if (keyBuf.length !== 32) throw new Error('ENCRYPTION_KEY must be 32 bytes (64 hex chars)');
+
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', keyBuf, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  return `${iv.toString('base64')}.${authTag.toString('base64')}.${encrypted.toString('base64')}`;
+}
+
+/**
+ * Decrypt an AES-256-GCM encrypted string
+ *
+ * @param encryptedStr - String in iv.authTag.ciphertext format
+ * @returns Decrypted plaintext
+ * @throws Error if decryption fails (tampered data, wrong key, etc.)
+ */
+export function decrypt(encryptedStr: string): string {
+  const key = process.env[ENCRYPTION_KEY_ENV];
+  if (!key) throw new Error('ENCRYPTION_KEY not configured');
+  const keyBuf = Buffer.from(key, 'hex');
+  if (keyBuf.length !== 32) throw new Error('ENCRYPTION_KEY must be 32 bytes (64 hex chars)');
+
+  const [ivB64, tagB64, dataB64] = encryptedStr.split('.');
+  if (!ivB64 || !tagB64 || !dataB64) throw new Error('Invalid encrypted format');
+
+  const iv = Buffer.from(ivB64, 'base64');
+  const authTag = Buffer.from(tagB64, 'base64');
+  const encrypted = Buffer.from(dataB64, 'base64');
+
+  const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuf, iv);
+  decipher.setAuthTag(authTag);
+  return decipher.update(encrypted) + decipher.final('utf8');
+}
+
+/**
+ * Encrypt a token if ENCRYPTION_KEY is available, otherwise return as-is.
+ * Used for non-critical paths where encryption is preferred but not required
+ * (e.g., test environments without ENCRYPTION_KEY configured).
+ */
+export function encryptIfAvailable(plaintext: string): string {
+  if (!process.env[ENCRYPTION_KEY_ENV]) return plaintext;
+  return encrypt(plaintext);
+}
+
+/**
+ * Decrypt a token if it looks like an encrypted string (has two dots),
+ * otherwise return as-is. Handles migration from unencrypted to encrypted storage.
+ */
+export function decryptIfEncrypted(value: string): string {
+  const parts = value.split('.');
+  if (parts.length !== 3) return value; // Not encrypted, return as-is
+  if (!process.env[ENCRYPTION_KEY_ENV]) return value; // No key, return as-is
+  return decrypt(value);
 }

@@ -68,6 +68,9 @@ export async function checkConsent(
 
     // Query for matching rules, ordered by specificity (most specific first)
     // Wildcard matching: tables/* matches tables/meals, tables/workouts, etc.
+    // H-6 SECURITY FIX: Escape LIKE metacharacters (%, _, \) in the stored resource
+    // pattern before converting * wildcards to %, so literal % and _ in resource
+    // names don't match arbitrary characters.
     const result = await tx.unsafe(
       `
       SELECT permission
@@ -76,7 +79,10 @@ export async function checkConsent(
         AND revoked_at IS NULL
         AND (
           resource = $2  -- Exact match
-          OR $2 LIKE REPLACE(resource || '%', '*', '%')  -- Wildcard match (tables/* matches tables/meals)
+          OR $2 LIKE REPLACE(
+            REPLACE(REPLACE(REPLACE(resource, E'\\\\', E'\\\\\\\\'), '%', E'\\\\%'), '_', E'\\\\_') || '%',
+            '*', '%'
+          ) ESCAPE E'\\\\'  -- Wildcard match with escaped LIKE metacharacters
         )
       ORDER BY LENGTH(resource) DESC  -- Most specific rule wins
       LIMIT 1
@@ -267,7 +273,10 @@ export async function getResourceConsent(
       WHERE revoked_at IS NULL
         AND (
           resource = $1
-          OR $1 LIKE REPLACE(resource || '%', '*', '%')
+          OR $1 LIKE REPLACE(
+            REPLACE(REPLACE(REPLACE(resource, E'\\\\', E'\\\\\\\\'), '%', E'\\\\%'), '_', E'\\\\_') || '%',
+            '*', '%'
+          ) ESCAPE E'\\\\'
         )
       ORDER BY agent_id, LENGTH(resource) DESC
     `,

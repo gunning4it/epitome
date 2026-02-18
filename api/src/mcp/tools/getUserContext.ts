@@ -38,7 +38,7 @@ interface VectorRow {
 export async function getUserContext(args: GetUserContextArgs, context: McpContext) {
   const { userId, agentId } = context;
 
-  // Consent check
+  // Consent check — profile is required (primary purpose of this tool)
   await requireConsent(userId, agentId, 'profile', 'read');
 
   // Audit log
@@ -52,70 +52,87 @@ export async function getUserContext(args: GetUserContextArgs, context: McpConte
   // Get profile
   const profile = await getLatestProfile(userId);
 
-  // Get table inventory
-  const tables = await listTables(userId);
+  // M-3 SECURITY FIX: Per-resource consent checks for each data type
+  // Tables — only if agent has tables consent
+  let tables: Awaited<ReturnType<typeof listTables>> = [];
+  try {
+    await requireConsent(userId, agentId, 'tables', 'read');
+    tables = await listTables(userId);
+  } catch { /* no tables consent — return empty */ }
 
-  // Get vector collections
-  const collections = await listCollections(userId);
+  // Vector collections — only if agent has vectors consent
+  let collections: Awaited<ReturnType<typeof listCollections>> = [];
+  try {
+    await requireConsent(userId, agentId, 'vectors', 'read');
+    collections = await listCollections(userId);
+  } catch { /* no vectors consent — return empty */ }
 
-  // Get top entities by composite score
-  const topEntities = await withUserSchema(userId, async (tx) => {
-    const result = await tx.unsafe(`
-      SELECT
-        e.id,
-        e.type,
-        e.name,
-        e.properties,
-        e.confidence,
-        e.mention_count,
-        e.last_seen,
-        (
-          e.confidence *
-          (1.0 + (0.5 * EXP(-EXTRACT(EPOCH FROM (NOW() - e.last_seen)) / (30 * 86400)))) *
-          (LOG(e.mention_count + 1) / NULLIF(LOG((SELECT MAX(mention_count) FROM entities WHERE _deleted_at IS NULL) + 1), 0))
-        ) AS composite_score
-      FROM entities e
-      WHERE e._deleted_at IS NULL
-      ORDER BY composite_score DESC
-      LIMIT 20
-    `);
+  // Graph entities — only if agent has graph consent
+  let topEntities: Array<{ type: string; name: string; properties: Record<string, unknown>; confidence: number; mentionCount: number }> = [];
+  try {
+    await requireConsent(userId, agentId, 'graph', 'read');
+    topEntities = await withUserSchema(userId, async (tx) => {
+      const result = await tx.unsafe(`
+        SELECT
+          e.id,
+          e.type,
+          e.name,
+          e.properties,
+          e.confidence,
+          e.mention_count,
+          e.last_seen,
+          (
+            e.confidence *
+            (1.0 + (0.5 * EXP(-EXTRACT(EPOCH FROM (NOW() - e.last_seen)) / (30 * 86400)))) *
+            (LOG(e.mention_count + 1) / NULLIF(LOG((SELECT MAX(mention_count) FROM entities WHERE _deleted_at IS NULL) + 1), 0))
+          ) AS composite_score
+        FROM entities e
+        WHERE e._deleted_at IS NULL
+        ORDER BY composite_score DESC
+        LIMIT 20
+      `);
 
-    return (result as unknown as EntityRow[]).map((row) => ({
-      type: row.type,
-      name: row.name,
-      properties: row.properties,
-      confidence: row.confidence,
-      mentionCount: row.mention_count,
-    }));
-  });
+      return (result as unknown as EntityRow[]).map((row) => ({
+        type: row.type,
+        name: row.name,
+        properties: row.properties,
+        confidence: row.confidence,
+        mentionCount: row.mention_count,
+      }));
+    });
+  } catch { /* no graph consent — return empty */ }
 
-  // Get recent vectors (last 10 memories)
-  const recentMemories = await withUserSchema(userId, async (tx) => {
-    const result = await tx.unsafe(`
-      SELECT
-        v.id,
-        v.collection,
-        v.text,
-        v.metadata,
-        v.created_at,
-        m.confidence,
-        m.status
-      FROM vectors v
-      LEFT JOIN memory_meta m ON v._meta_id = m.id
-      WHERE v._deleted_at IS NULL
-      ORDER BY v.created_at DESC
-      LIMIT 10
-    `);
+  // Recent memories/vectors — only if agent has vectors consent
+  let recentMemories: Array<{ collection: string; text: string; metadata: Record<string, unknown>; confidence: number | null; status: string | null; createdAt: Date }> = [];
+  try {
+    await requireConsent(userId, agentId, 'vectors', 'read');
+    recentMemories = await withUserSchema(userId, async (tx) => {
+      const result = await tx.unsafe(`
+        SELECT
+          v.id,
+          v.collection,
+          v.text,
+          v.metadata,
+          v.created_at,
+          m.confidence,
+          m.status
+        FROM vectors v
+        LEFT JOIN memory_meta m ON v._meta_id = m.id
+        WHERE v._deleted_at IS NULL
+        ORDER BY v.created_at DESC
+        LIMIT 10
+      `);
 
-    return (result as unknown as VectorRow[]).map((row) => ({
-      collection: row.collection,
-      text: row.text,
-      metadata: row.metadata,
-      confidence: row.confidence,
-      status: row.status,
-      createdAt: row.created_at,
-    }));
-  });
+      return (result as unknown as VectorRow[]).map((row) => ({
+        collection: row.collection,
+        text: row.text,
+        metadata: row.metadata,
+        confidence: row.confidence,
+        status: row.status,
+        createdAt: row.created_at,
+      }));
+    });
+  } catch { /* no vectors consent — return empty */ }
 
   return {
     profile: profile?.data || null,

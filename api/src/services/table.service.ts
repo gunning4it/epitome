@@ -20,6 +20,23 @@ import {
   detectContradictionsInternal,
 } from './memoryQuality.service';
 
+// L-6 SECURITY FIX: Tables protected from write operations via CRUD endpoints
+const WRITE_PROTECTED_TABLES = new Set([
+  'audit_log',
+  '_table_registry',
+  '_memory_meta',
+]);
+
+/**
+ * Check if a table is write-protected (system/audit tables).
+ * Throws if the table cannot be modified through CRUD endpoints.
+ */
+function assertWritable(tableName: string): void {
+  if (WRITE_PROTECTED_TABLES.has(tableName)) {
+    throw new Error(`FORBIDDEN: Table '${tableName}' is write-protected and cannot be modified through this endpoint`);
+  }
+}
+
 /**
  * Table metadata
  */
@@ -263,6 +280,7 @@ export async function insertRecord(
   tableDescription?: string
 ): Promise<number> {
   validateTableName(tableName);
+  assertWritable(tableName);
 
   return await withUserSchema(userId, async (tx) => {
     // Check if table exists - need to do this check within the transaction
@@ -514,6 +532,7 @@ export async function updateRecord(
   origin: string = 'user_typed'
 ): Promise<TableRecord> {
   validateTableName(tableName);
+  assertWritable(tableName);
 
   return await withUserSchema(userId, async (tx) => {
     const existingRows = await tx.unsafe<Record<string, unknown>[]>(
@@ -640,6 +659,7 @@ export async function deleteRecord(
   recordId: number
 ): Promise<void> {
   validateTableName(tableName);
+  assertWritable(tableName);
 
   await withUserSchema(userId, async (tx) => {
     const deleted = await tx.unsafe<Array<{ id: number }>>(

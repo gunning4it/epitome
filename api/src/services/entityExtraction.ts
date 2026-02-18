@@ -1526,7 +1526,9 @@ export async function scheduleNightlyExtraction(): Promise<void> {
       return;
     }
 
-    const batchSize = Number(process.env.NIGHTLY_EXTRACTION_BATCH_SIZE || 100);
+    // L-3 SECURITY FIX: Validate and clamp batchSize to prevent injection via env var
+    const rawBatchSize = Math.floor(Number(process.env.NIGHTLY_EXTRACTION_BATCH_SIZE || 100));
+    const batchSize = Math.max(1, Math.min(1000, Number.isFinite(rawBatchSize) ? rawBatchSize : 100));
     const command = `
 DO $job$
 DECLARE

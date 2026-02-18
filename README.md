@@ -388,25 +388,31 @@ railway up
 
 #### Fly.io
 
+Epitome uses separate Fly.io configs for staging and production. **Always use the correct config file** to avoid deploying with the wrong `VITE_API_URL` or `BASE_URL`.
+
 ```bash
 # 1. Install Fly CLI
 curl -L https://fly.io/install.sh | sh
 
-# 2. Login and launch app
+# 2. Login
 fly auth login
-fly launch
 
-# 3. Add PostgreSQL
-fly postgres create
+# 3. Set secrets (see "Environment Variables for Production" below)
+fly secrets set --app epitome-prod-api OPENAI_API_KEY=sk-...
+fly secrets set --app epitome-prod-api GOOGLE_CLIENT_ID=...
 
-# 4. Set secrets
-fly secrets set OPENAI_API_KEY=sk-...
-fly secrets set GOOGLE_CLIENT_ID=...
-fly secrets set SESSION_SECRET=$(openssl rand -base64 32)
+# 4. Deploy
 
-# 5. Deploy
-fly deploy
+# --- Staging (default fly.toml) ---
+cd api && fly deploy                        # → epitome-staging-api
+cd dashboard && fly deploy                  # → epitome-staging-dashboard (VITE_API_URL=staging)
+
+# --- Production (fly.prod.toml) ---
+cd api && fly deploy -c fly.prod.toml       # → epitome-prod-api
+cd dashboard && fly deploy -c fly.prod.toml # → epitome-prod-dashboard (VITE_API_URL=api.epitome.fyi)
 ```
+
+> **Warning:** Running `fly deploy` (without `-c fly.prod.toml`) in the dashboard directory will bake `VITE_API_URL` to the **staging** API URL. Since Vite environment variables are compiled at build time, this causes the production dashboard to send OAuth and API requests to staging.
 
 #### Environment Variables for Production
 

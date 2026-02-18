@@ -137,6 +137,13 @@ function validateAstNode(node: unknown, originalSql: string): void {
       );
     }
 
+    // H-5 SECURITY FIX: Block ALL explicit schema references — queries must use search_path
+    if (typeof schemaname === 'string' && schemaname.length > 0) {
+      throw new Error(
+        'SQL_SANDBOX_ERROR: Explicit schema references are not allowed. Use unqualified table names only.'
+      );
+    }
+
     // Block system catalogs even without explicit schema
     if (typeof relname === 'string') {
       const lowerRelname = relname.toLowerCase();
@@ -246,18 +253,20 @@ export async function executeSandboxedQuery(
 
   const result = await withUserSchema(userId, async (tx) => {
     try {
-      // Set statement timeout (use string concatenation to avoid template parsing)
-      await tx.unsafe('SET LOCAL statement_timeout = \'' + timeout + 's\'');
+      // Set statement timeout with runtime numeric coercion + bounds clamping
+      const safeTimeout = Math.min(Math.max(Math.floor(Number(timeout)), 1), 60);
+      await tx.unsafe('SET LOCAL statement_timeout = \'' + safeTimeout + 's\'');
 
       // Execute query with row limit
       // Remove trailing semicolon if present
       const cleanSql = sql.trim().replace(/;$/, '');
 
       // Use string concatenation to avoid template literal issues with % signs
+      const safeRowLimit = Math.min(Math.max(Math.floor(Number(rowLimit)), 1), 10000);
       const limitedSql =
         'WITH limited_query AS (' +
         cleanSql +
-        ') SELECT * FROM limited_query LIMIT ' + rowLimit;
+        ') SELECT * FROM limited_query LIMIT ' + safeRowLimit;
 
       const rows = await tx.unsafe<Array<Record<string, unknown>>>(limitedSql);
       const filteredRows = options.excludeSoftDeleted
@@ -316,7 +325,8 @@ export async function explainQuery(
   await validateSqlQuery(sql);
 
   return await withUserSchema(userId, async (tx) => {
-    const explainSql = `EXPLAIN (FORMAT JSON) ${sql}`;
+    const cleanSql = sql.trim().replace(/;$/, '');
+    const explainSql = `EXPLAIN (FORMAT JSON) ${cleanSql}`;
     const result = await tx.unsafe(explainSql);
     return result as Array<Record<string, unknown>>;
   });
@@ -354,6 +364,13 @@ export function validateTableName(tableName: string): string {
     'TABLE',
     'FROM',
     'WHERE',
+    'GRANT',
+    'REVOKE',
+    'EXECUTE',
+    'TRUNCATE',
+    'COPY',
+    'VACUUM',
+    'ANALYZE',
   ];
 
   if (reservedKeywords.includes(upperName)) {
@@ -375,12 +392,12 @@ export function validateTableName(tableName: string): string {
  * @throws Error if column name is invalid
  */
 export function validateColumnName(columnName: string): string {
-  // Allow alphanumeric characters, underscores, and hyphens
-  const validPattern = /^[a-zA-Z][a-zA-Z0-9_-]{0,62}$/;
+  // Allow alphanumeric characters and underscores only (no hyphens — not valid SQL identifiers)
+  const validPattern = /^[a-zA-Z][a-zA-Z0-9_]{0,62}$/;
 
   if (!validPattern.test(columnName)) {
     throw new Error(
-      'SQL_SANDBOX_ERROR: Invalid column name. Must start with a letter and contain only alphanumeric characters, underscores, and hyphens (max 63 chars)'
+      'SQL_SANDBOX_ERROR: Invalid column name. Must start with a letter and contain only alphanumeric characters and underscores (max 63 chars)'
     );
   }
 

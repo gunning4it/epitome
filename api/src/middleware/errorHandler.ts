@@ -20,6 +20,13 @@ export interface ErrorResponse {
   };
 }
 
+// L-7 SECURITY FIX: Only show verbose errors in development and test,
+// never in staging or production
+function isVerboseErrors(): boolean {
+  const env = process.env.NODE_ENV;
+  return env === 'development' || env === 'test';
+}
+
 /**
  * Global error handler middleware
  *
@@ -71,7 +78,9 @@ export const errorHandler: MiddlewareHandler = async (c: Context, next: Next) =>
           {
             error: {
               code: 'FORBIDDEN',
-              message: error.message,
+              message: isVerboseErrors()
+                ? error.message
+                : 'Access denied',
             },
           },
           403
@@ -83,7 +92,9 @@ export const errorHandler: MiddlewareHandler = async (c: Context, next: Next) =>
           {
             error: {
               code: 'NOT_FOUND',
-              message: error.message,
+              message: isVerboseErrors()
+                ? error.message
+                : 'Resource not found',
             },
           },
           404
@@ -95,7 +106,9 @@ export const errorHandler: MiddlewareHandler = async (c: Context, next: Next) =>
           {
             error: {
               code: 'BAD_REQUEST',
-              message: error.message,
+              message: isVerboseErrors()
+                ? error.message
+                : 'Query validation failed',
             },
           },
           400
@@ -107,10 +120,9 @@ export const errorHandler: MiddlewareHandler = async (c: Context, next: Next) =>
         {
           error: {
             code: 'INTERNAL_ERROR',
-            message:
-              process.env.NODE_ENV === 'production'
-                ? 'An internal error occurred'
-                : error.message,
+            message: isVerboseErrors()
+              ? error.message
+              : 'An internal error occurred',
           },
         },
         500

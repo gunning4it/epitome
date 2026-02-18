@@ -122,7 +122,7 @@ export const graphQuerySchema = z.object({
   timeout: z.number().int().min(1).max(60).optional(),
 
   // Common
-  limit: z.number().int().positive().max(10000).optional(),
+  limit: z.number().int().positive().max(1000).optional(),
 }).strict().refine((data) => data.query || data.sql, {
   message: 'Must provide either query or sql parameter',
 });

@@ -9,9 +9,9 @@
  */
 
 import { db, sql as pgSql } from '@/db/client';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, gt, lt } from 'drizzle-orm';
 import { users, apiKeys, sessions, oauthConnections } from '@/db/schema';
-import { generateApiKey, generateSessionToken, hashSessionToken } from '@/utils/crypto';
+import { generateApiKey, generateSessionToken, hashSessionToken, encryptIfAvailable } from '@/utils/crypto';
 import { OAuthProvider } from '@/validators/auth';
 import { logger } from '@/utils/logger';
 import { initializeProfile } from '@/services/profile.service';
@@ -70,7 +70,8 @@ export interface ApiKey {
 export async function handleOAuthCallback(
   provider: OAuthProvider,
   _code: string,
-  profile: OAuthProfile
+  profile: OAuthProfile,
+  tokens?: { accessToken?: string; refreshToken?: string; expiresIn?: number }
 ): Promise<{ session: Session; user: typeof users.$inferSelect; isNewUser: boolean }> {
   // Find or create user by email
   let [user] = await db
@@ -121,6 +122,17 @@ export async function handleOAuthCallback(
       .returning();
   }
 
+  // H-3 SECURITY FIX: Encrypt OAuth provider tokens before storage
+  const encryptedAccessToken = tokens?.accessToken
+    ? encryptIfAvailable(tokens.accessToken)
+    : null;
+  const encryptedRefreshToken = tokens?.refreshToken
+    ? encryptIfAvailable(tokens.refreshToken)
+    : null;
+  const tokenExpiresAt = tokens?.expiresIn
+    ? new Date(Date.now() + tokens.expiresIn * 1000)
+    : null;
+
   // Store or update OAuth connection
   const [existingConnection] = await db
     .select()
@@ -138,6 +150,9 @@ export async function handleOAuthCallback(
       .update(oauthConnections)
       .set({
         providerUserId: profile.id,
+        accessToken: encryptedAccessToken,
+        refreshToken: encryptedRefreshToken,
+        tokenExpiresAt,
         rawProfile: profile.raw_profile || {},
       })
       .where(eq(oauthConnections.id, existingConnection.id));
@@ -146,6 +161,9 @@ export async function handleOAuthCallback(
       userId: user.id,
       provider,
       providerUserId: profile.id,
+      accessToken: encryptedAccessToken,
+      refreshToken: encryptedRefreshToken,
+      tokenExpiresAt,
       rawProfile: profile.raw_profile || {},
     });
   }
@@ -162,8 +180,7 @@ export async function handleOAuthCallback(
     .insert(sessions)
     .values({
       userId: user.id,
-      token: null, // No longer store raw token
-      tokenHash, // Store hash instead
+      tokenHash,
       expiresAt,
     })
     .returning();
@@ -380,10 +397,13 @@ export async function refreshSession(token: string): Promise<Session | null> {
 
   const tokenHash = hashSessionToken(token);
 
+  // H-1 SECURITY FIX: Only refresh sessions that haven't expired yet.
+  // Without this check, an expired session token could be refreshed indefinitely.
+  const now = new Date();
   const [updated] = await db
     .update(sessions)
     .set({ expiresAt: newExpiresAt })
-    .where(eq(sessions.tokenHash, tokenHash))
+    .where(and(eq(sessions.tokenHash, tokenHash), gt(sessions.expiresAt, now)))
     .returning();
 
   if (!updated) {
@@ -434,4 +454,20 @@ export async function getUserApiKeys(userId: string): Promise<
     expiresAt: key.expiresAt,
     createdAt: key.createdAt,
   }));
+}
+
+/**
+ * Clean up expired sessions (L-1 Security Fix)
+ *
+ * Removes sessions past their expiration time to prevent
+ * accumulation of stale session records.
+ *
+ * @returns Number of expired sessions deleted
+ */
+export async function cleanupExpiredSessions(): Promise<number> {
+  const result = await db
+    .delete(sessions)
+    .where(lt(sessions.expiresAt, new Date()))
+    .returning({ id: sessions.id });
+  return result.length;
 }

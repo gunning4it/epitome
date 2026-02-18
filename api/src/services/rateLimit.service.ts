@@ -60,6 +60,10 @@ const RATE_LIMIT_CONFIG = {
   },
 };
 
+// NOTE: Rate limit state is in-memory only. Resets on server restart and is
+// per-instance (not shared across replicas). For production multi-instance
+// deployments, migrate to Redis-backed rate limiting.
+
 /**
  * Rate limiter instances per tier
  */
@@ -123,13 +127,14 @@ export async function consumeRateLimit(
       };
     }
 
-    // Unknown error - fail open (allow request but log)
-    logger.error('Rate limiter error', { error: String(error) });
+    // M-6 SECURITY FIX: Fail closed on rate limiter errors (deny request)
+    logger.error('Rate limiter error, denying request (fail-closed)', { error: String(error) });
     return {
-      allowed: true,
+      allowed: false,
       tier,
-      remainingPoints: config.points,
+      remainingPoints: 0,
       resetTime: Math.floor(Date.now() / 1000) + config.duration,
+      retryAfter: 60,
     };
   }
 }

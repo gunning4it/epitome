@@ -105,7 +105,7 @@ describe('CORS Security (H-2 Fix)', () => {
       );
     });
 
-    test('should allow unknown origin requests to /v1/* endpoints', async () => {
+    test('should reject unknown origin requests to /v1/* endpoints', async () => {
       const headers = createTestAuthHeaders(testUser);
       headers.set('origin', 'https://unknown.com');
 
@@ -114,8 +114,9 @@ describe('CORS Security (H-2 Fix)', () => {
         headers,
       });
 
-      // Should allow any origin for API routes (Bearer auth)
-      expect(response.headers.get('access-control-allow-origin')).toBeDefined();
+      // Unknown origins must be rejected — MCP/CLI clients use the no-origin wildcard path
+      const allowOrigin = response.headers.get('access-control-allow-origin');
+      expect(!allowOrigin || allowOrigin === '').toBe(true);
     });
 
     test('should not set credentials flag on API routes', async () => {

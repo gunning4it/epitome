@@ -310,6 +310,12 @@ async function markPendingVectorDone(id: number, vectorId: number): Promise<void
   );
 }
 
+// L-2 SECURITY FIX: Strict allowlist for queue table names prevents SQL injection
+const QUEUE_TABLE_MAP = {
+  'enrichment_jobs': 'public.enrichment_jobs',
+  'pending_vectors': 'public.pending_vectors',
+} as const;
+
 async function markJobFailure(
   table: 'enrichment_jobs' | 'pending_vectors',
   id: number,
@@ -321,9 +327,8 @@ async function markJobFailure(
   const exhausted = nextAttempt >= DEFAULT_MAX_ATTEMPTS;
   const status: QueueStatus = retryable && !exhausted ? 'retry' : 'failed';
 
-  const tableName = table === 'pending_vectors'
-    ? 'public.pending_vectors'
-    : 'public.enrichment_jobs';
+  const tableName = QUEUE_TABLE_MAP[table];
+  if (!tableName) throw new Error(`Invalid queue table: ${table}`);
 
   if (status === 'retry') {
     const backoff = computeBackoffSeconds(nextAttempt);

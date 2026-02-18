@@ -10,6 +10,7 @@
  */
 
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { HonoEnv } from '@/types/hono';
 import { requireAuth, requireUser } from '@/middleware/auth';
 import { db } from '@/db/client';
@@ -22,6 +23,16 @@ import {
   revokeAllAgentConsent,
 } from '@/services/consent.service';
 import { logger } from '@/utils/logger';
+
+// H-7 SECURITY FIX: Zod schema for consent update validation
+const consentUpdateSchema = z.object({
+  permissions: z.array(z.object({
+    resource: z.string().min(1).max(200).regex(/^[a-zA-Z0-9_/*.-]+$/),
+    permission: z.enum(['read', 'write', 'none']),
+  })).min(1).max(50),
+}).strict();
+
+const agentIdParamSchema = z.string().min(1).max(200).regex(/^[a-zA-Z0-9_.-]+$/);
 
 const consent = new Hono<HonoEnv>();
 
@@ -86,19 +97,29 @@ consent.get('/', requireAuth, requireUser, async (c) => {
  */
 consent.patch('/:agentId', requireAuth, requireUser, async (c) => {
   const userId = c.get('userId') as string;
-  const agentId = c.req.param('agentId');
+  const rawAgentId = c.req.param('agentId');
+
+  // H-7 SECURITY FIX: Validate agentId path parameter
+  const agentIdResult = agentIdParamSchema.safeParse(rawAgentId);
+  if (!agentIdResult.success) {
+    return c.json(
+      { error: { code: 'BAD_REQUEST', message: 'Invalid agentId parameter', details: agentIdResult.error.issues } },
+      400
+    );
+  }
+  const agentId = agentIdResult.data;
 
   try {
-    const body = await c.req.json<{
-      permissions: Array<{ resource: string; permission: 'read' | 'write' | 'none' }>;
-    }>();
-
-    if (!body.permissions || !Array.isArray(body.permissions)) {
+    // H-7 SECURITY FIX: Validate request body with Zod schema
+    const rawBody = await c.req.json();
+    const bodyResult = consentUpdateSchema.safeParse(rawBody);
+    if (!bodyResult.success) {
       return c.json(
-        { error: { code: 'BAD_REQUEST', message: 'permissions array is required' } },
+        { error: { code: 'BAD_REQUEST', message: 'Invalid request body', details: bodyResult.error.issues } },
         400
       );
     }
+    const body = bodyResult.data;
 
     // Deduplicate permissions — last one wins per resource
     const deduped = new Map<string, 'read' | 'write' | 'none'>();

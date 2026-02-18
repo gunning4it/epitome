@@ -133,7 +133,6 @@ export const sessions = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    token: varchar('token', { length: 256 }).unique(), // DEPRECATED: nullable for migration
     tokenHash: varchar('token_hash', { length: 64 }).unique(), // H-1 Security Fix: SHA-256 hash
     ipAddress: varchar('ip_address', { length: 45 }),
     userAgent: varchar('user_agent', { length: 500 }),

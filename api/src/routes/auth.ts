@@ -41,6 +41,26 @@ import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from '@/utils/logger';
 
+/**
+ * C-2 SECURITY FIX: Validate redirect URLs against an allowlist
+ * to prevent open redirect attacks after OAuth callback.
+ */
+function isAllowedRedirect(url: string): boolean {
+  if (url.startsWith('/')) return true; // relative paths always OK
+  try {
+    const parsed = new URL(url);
+    const ALLOWED_HOSTS = new Set([
+      'localhost',
+      'epitome.fyi',
+      'www.epitome.fyi',
+      ...(process.env.CORS_ORIGIN ? [new URL(process.env.CORS_ORIGIN).hostname] : []),
+    ]);
+    return ALLOWED_HOSTS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 const auth = new Hono<HonoEnv>();
 
 /**
@@ -160,10 +180,16 @@ auth.get('/callback', zValidator('query', callbackQuerySchema), async (c) => {
   }
 
   // Handle OAuth callback (create/update user, create session)
+  // H-3 SECURITY FIX: Pass OAuth tokens for encrypted storage
   const { session, isNewUser } = await handleOAuthCallback(
     provider,
     code,
-    profile
+    profile,
+    {
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token,
+      expiresIn: tokenData.expires_in,
+    }
   );
 
   // Set session cookie
@@ -173,7 +199,7 @@ auth.get('/callback', zValidator('query', callbackQuerySchema), async (c) => {
   setCookie(c, 'epitome_session', session.token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.COOKIE_DOMAIN ? 'Lax' : (process.env.NODE_ENV === 'production' ? 'None' : 'Lax'),
+    sameSite: 'Lax', // H-4 SECURITY FIX: Always use Lax, never None
     maxAge: sessionTtlDays * 24 * 60 * 60,
     path: '/',
     domain: process.env.COOKIE_DOMAIN || undefined,
@@ -187,8 +213,12 @@ auth.get('/callback', zValidator('query', callbackQuerySchema), async (c) => {
     return c.redirect(`${dashboardUrl}/profile`);
   }
 
-  // If redirectUri is an absolute URL (e.g. OAuth authorize page), redirect directly to it
+  // C-2 SECURITY FIX: Validate redirect target against allowlist
   if (redirectTarget.startsWith('http://') || redirectTarget.startsWith('https://')) {
+    if (!isAllowedRedirect(redirectTarget)) {
+      logger.warn('Blocked open redirect attempt', { redirectTarget });
+      return c.redirect(`${dashboardUrl}/profile`);
+    }
     return c.redirect(redirectTarget);
   }
 
@@ -294,7 +324,7 @@ auth.post('/refresh', async (c) => {
   setCookie(c, 'epitome_session', session.token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.COOKIE_DOMAIN ? 'Lax' : (process.env.NODE_ENV === 'production' ? 'None' : 'Lax'),
+    sameSite: 'Lax', // H-4 SECURITY FIX: Always use Lax, never None
     maxAge: sessionTtlDays * 24 * 60 * 60,
     path: '/',
     domain: process.env.COOKIE_DOMAIN || undefined,

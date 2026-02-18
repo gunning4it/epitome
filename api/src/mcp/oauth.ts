@@ -15,8 +15,9 @@
  * The existing authResolver middleware validates them automatically.
  */
 
+import crypto from 'crypto';
 import { Context } from 'hono';
-import { getCookie } from 'hono/cookie';
+import { getCookie, setCookie } from 'hono/cookie';
 import { db } from '@/db/client';
 import { eq, and, isNull, gt } from 'drizzle-orm';
 import { oauthClients, oauthAuthorizationCodes, users, sessions } from '@/db/schema';
@@ -25,6 +26,7 @@ import {
   generateOAuthClientId,
   verifyPkceS256,
   hashSessionToken,
+  constantTimeCompare,
 } from '@/utils/crypto';
 import { createApiKeyForUser } from '@/services/auth.service';
 import { logger } from '@/utils/logger';
@@ -251,6 +253,16 @@ export async function oauthAuthorize(c: Context) {
     .where(eq(users.id, session.userId))
     .limit(1);
 
+  // C-3 SECURITY FIX: Generate CSRF token for consent form (double-submit pattern)
+  const csrfToken = crypto.randomBytes(32).toString('hex');
+  setCookie(c, 'csrf_token', csrfToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'Strict',
+    path: '/v1/auth/oauth/authorize',
+    maxAge: 600, // 10 minutes
+  });
+
   // Render consent page
   return c.html(
     renderConsentPage({
@@ -262,6 +274,7 @@ export async function oauthAuthorize(c: Context) {
       codeChallenge,
       codeChallengeMethod,
       state,
+      csrfToken,
     }),
     200
   );
@@ -283,6 +296,13 @@ export async function oauthAuthorizeConsent(c: Context) {
   const codeChallengeMethod = body['code_challenge_method'] as string || 'S256';
   const state = body['state'] as string || '';
   const scope = body['scope'] as string || '';
+
+  // C-3 SECURITY FIX: Verify CSRF token (double-submit cookie pattern)
+  const csrfFromForm = body['csrf_token'] as string;
+  const csrfFromCookie = getCookie(c, 'csrf_token');
+  if (!csrfFromForm || !csrfFromCookie || !constantTimeCompare(csrfFromForm, csrfFromCookie)) {
+    return c.html(renderErrorPage('CSRF token validation failed'), 403);
+  }
 
   if (!clientId || !redirectUri || !codeChallenge) {
     return c.html(renderErrorPage('Missing required form fields'), 400);
@@ -315,12 +335,15 @@ export async function oauthAuthorizeConsent(c: Context) {
     return c.html(renderErrorPage('Session expired. Please try again.'), 401);
   }
 
-  // Generate authorization code (10 min TTL)
+  // M-11 SECURITY FIX: Reduce auth code TTL from 10 minutes to 60 seconds
   const code = generateAuthorizationCode();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + 60 * 1000);
+
+  // H-2 SECURITY FIX: Hash authorization code before storage
+  const codeHash = crypto.createHash('sha256').update(code).digest('hex');
 
   await db.insert(oauthAuthorizationCodes).values({
-    code,
+    code: codeHash,
     clientId,
     userId: session.userId,
     redirectUri,
@@ -384,14 +407,22 @@ export async function oauthToken(c: Context) {
     return c.json({ error: 'invalid_request', error_description: 'code and code_verifier are required' }, 400);
   }
 
-  // Look up the authorization code
+  // RFC 7636 §4.1: code_verifier MUST be 43-128 characters
+  if (codeVerifier.length < 43 || codeVerifier.length > 128) {
+    return c.json({ error: 'invalid_request', error_description: 'code_verifier must be 43-128 characters (RFC 7636)' }, 400);
+  }
+
+  // H-2 SECURITY FIX: Hash the incoming code before lookup
+  const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+  // Look up the authorization code by hash
   const now = new Date();
   const [authCode] = await db
     .select()
     .from(oauthAuthorizationCodes)
     .where(
       and(
-        eq(oauthAuthorizationCodes.code, code),
+        eq(oauthAuthorizationCodes.code, codeHash),
         isNull(oauthAuthorizationCodes.usedAt),
         gt(oauthAuthorizationCodes.expiresAt, now)
       )
@@ -526,6 +557,7 @@ function renderConsentPage(params: {
   codeChallenge: string;
   codeChallengeMethod: string;
   state: string;
+  csrfToken: string;
 }): string {
   const scopes = params.scope ? params.scope.split(/[\s,]+/).filter(Boolean) : ['full access'];
   const scopeItems = scopes.map((s) => `<li>${escapeHtml(s)}</li>`).join('');
@@ -557,6 +589,7 @@ function renderConsentPage(params: {
     </div>
 
     <form method="POST" action="/v1/auth/oauth/authorize">
+      <input type="hidden" name="csrf_token" value="${escapeAttr(params.csrfToken)}">
       <input type="hidden" name="client_id" value="${escapeAttr(params.clientId)}">
       <input type="hidden" name="redirect_uri" value="${escapeAttr(params.redirectUri)}">
       <input type="hidden" name="code_challenge" value="${escapeAttr(params.codeChallenge)}">

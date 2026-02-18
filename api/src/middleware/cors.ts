@@ -63,6 +63,7 @@ const apiCorsHandler = async (c: Context, next: Next) => {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
     'Access-Control-Expose-Headers': 'Content-Length, X-Request-ID',
     'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
   };
 
   if (!origin) {
@@ -73,8 +74,8 @@ const apiCorsHandler = async (c: Context, next: Next) => {
     headers['Access-Control-Allow-Origin'] = origin;
     headers['Access-Control-Allow-Credentials'] = 'true';
   } else {
-    // Unknown origin — echo back for Bearer auth use cases
-    headers['Access-Control-Allow-Origin'] = origin;
+    // Unknown origin — reject. MCP/CLI clients use the no-origin wildcard path above.
+    headers['Access-Control-Allow-Origin'] = '';
   }
 
   // Preflight: return 204 with CORS headers directly

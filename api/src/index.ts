@@ -9,10 +9,11 @@
 
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
+import { securityHeaders } from '@/middleware/securityHeaders';
 import { corsMiddleware } from '@/middleware/cors';
 import { errorHandler } from '@/middleware/errorHandler';
 import { authResolver } from '@/middleware/auth';
-import { rateLimitMiddleware } from '@/middleware/rateLimit';
+import { rateLimitMiddleware, expensiveOperationRateLimit } from '@/middleware/rateLimit';
 import authRoutes from '@/routes/auth';
 import profileRoutes from '@/routes/profile';
 import tablesRoutes from '@/routes/tables';
@@ -41,6 +42,7 @@ import type { HonoEnv } from '@/types/hono';
 const app = new Hono<HonoEnv>();
 
 // Global middleware chain
+app.use('*', securityHeaders);
 app.use('*', corsMiddleware);
 app.use('*', errorHandler);
 app.use('*', authResolver);
@@ -73,10 +75,13 @@ app.route('/mcp', createMcpRoutes());
 // OAuth 2.0 discovery + MCP OAuth flow
 app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata);
 app.get('/.well-known/oauth-authorization-server', oauthDiscovery);
-app.post('/v1/auth/oauth/register', oauthRegister);
+app.post('/v1/auth/oauth/register', expensiveOperationRateLimit, oauthRegister); // M-5 SECURITY FIX: Stricter rate limit
 app.get('/v1/auth/oauth/authorize', oauthAuthorize);
 app.post('/v1/auth/oauth/authorize', oauthAuthorizeConsent);
 app.post('/v1/auth/oauth/token', oauthToken);
+
+// L-7 SECURITY FIX: Only show verbose errors in development and test
+const verboseErrors = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
 
 // Global error handler (catches errors that escape middleware)
 app.onError((error, c) => {
@@ -86,7 +91,7 @@ app.onError((error, c) => {
       {
         error: {
           code: 'BAD_REQUEST',
-          message: error.message,
+          message: verboseErrors ? error.message : 'Query validation failed',
         },
       },
       400
@@ -99,7 +104,7 @@ app.onError((error, c) => {
       {
         error: {
           code: 'NOT_FOUND',
-          message: error.message,
+          message: verboseErrors ? error.message : 'Resource not found',
         },
       },
       404
@@ -112,7 +117,7 @@ app.onError((error, c) => {
       {
         error: {
           code: 'FORBIDDEN',
-          message: error.message,
+          message: verboseErrors ? error.message : 'Access denied',
         },
       },
       403
@@ -132,9 +137,7 @@ app.onError((error, c) => {
     {
       error: {
         code: 'INTERNAL_ERROR',
-        message: process.env.NODE_ENV === 'production'
-          ? 'An internal error occurred'
-          : error.message,
+        message: verboseErrors ? error.message : 'An internal error occurred',
       },
     },
     500
@@ -167,39 +170,42 @@ if (process.env.NODE_ENV !== 'test') {
     });
   }
 
-  serve({
+  // M-10 SECURITY FIX: Capture server reference for graceful shutdown with request drain
+  const server = serve({
     fetch: app.fetch,
     port: PORT,
   });
 
-  console.log(`🚀 Epitome API Server running on http://localhost:${PORT}`);
-  console.log(`📋 Health check: http://localhost:${PORT}/health`);
-  console.log(`🔐 Auth endpoints: http://localhost:${PORT}/v1/auth/*`);
-  console.log(`👤 Profile: http://localhost:${PORT}/v1/profile`);
-  console.log(`📊 Tables: http://localhost:${PORT}/v1/tables`);
-  console.log(`🔍 Vectors: http://localhost:${PORT}/v1/vectors`);
-  console.log(`🧠 Memory: http://localhost:${PORT}/v1/memory`);
-  console.log(`🕸️  Graph: http://localhost:${PORT}/v1/graph`);
-  console.log(`📈 Activity: http://localhost:${PORT}/v1/activity`);
-  console.log(`🤖 MCP Server: http://localhost:${PORT}/mcp`);
-  console.log(`🔓 OAuth Discovery: http://localhost:${PORT}/.well-known/oauth-authorization-server`);
+  console.log(`Epitome API Server running on http://localhost:${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`Auth endpoints: http://localhost:${PORT}/v1/auth/*`);
+  console.log(`MCP Server: http://localhost:${PORT}/mcp`);
+  console.log(`OAuth Discovery: http://localhost:${PORT}/.well-known/oauth-authorization-server`);
+
+  // M-10 SECURITY FIX: Graceful shutdown with request drain
+  function gracefulShutdown(signal: string) {
+    logger.info(`${signal} received: shutting down gracefully...`);
+    server.close(() => {
+      logger.info('HTTP server closed, draining connections');
+      stopEnrichmentWorkers();
+      stopMemoryDecayScheduler();
+      closeDatabase().then(() => {
+        logger.info('Database connections closed');
+        process.exit(0);
+      }).catch((err) => {
+        logger.error('Error closing database', { error: String(err) });
+        process.exit(1);
+      });
+    });
+    // Force exit after 10 seconds if drain takes too long
+    setTimeout(() => {
+      logger.error('Forced shutdown after 10s timeout');
+      process.exit(1);
+    }, 10_000);
+  }
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
-
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM signal received: closing HTTP server');
-  stopEnrichmentWorkers();
-  stopMemoryDecayScheduler();
-  await closeDatabase();
-  process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-  logger.info('SIGINT signal received: closing HTTP server');
-  stopEnrichmentWorkers();
-  stopMemoryDecayScheduler();
-  await closeDatabase();
-  process.exit(0);
-});
 
 export default app;

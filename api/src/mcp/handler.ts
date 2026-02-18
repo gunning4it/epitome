@@ -70,8 +70,8 @@ export function createMcpRoutes(): Hono<HonoEnv> {
     const userId = c.get('userId') as string | undefined;
     const agentId = (c.get('agentId') as string | undefined) || extractAgentId(c);
 
-    // Require auth for POST (tool calls). Return 401 + WWW-Authenticate to trigger OAuth.
-    if (c.req.method === 'POST' && !userId) {
+    // M-4 SECURITY FIX: Require auth for ALL methods, not just POST
+    if (!userId) {
       const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
       c.header(
         'WWW-Authenticate',
@@ -114,19 +114,43 @@ export function createMcpRoutes(): Hono<HonoEnv> {
   // --- Legacy REST endpoints (backward compatibility) ---
 
   // List tools
+  // M-2 SECURITY FIX: Require authentication for tool listing
   app.get('/tools', (c) => {
+    const userId = c.get('userId');
+    if (!userId) {
+      return c.json({ error: 'Authentication required' }, 401);
+    }
     return c.json({
       tools: getToolDefinitions(),
     });
   });
 
   // Call a tool
+  // M-1 SECURITY FIX: Validate tool name and request body before execution
   app.post('/call/:toolName', async (c) => {
     const toolName = c.req.param('toolName');
+
+    // M-1: Validate toolName against known tool names
+    const knownTools = getToolDefinitions().map((t) => t.name);
+    if (!knownTools.includes(toolName)) {
+      return c.json(
+        { success: false, error: { code: 'BAD_REQUEST', message: `Unknown tool: ${toolName}` } },
+        400
+      );
+    }
+
     try {
       // Build MCP context from auth middleware
       const context = buildMcpContext(c);
       const args = await c.req.json();
+
+      // M-1: Validate request body is a plain object (not array, not primitive)
+      if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+        return c.json(
+          { success: false, error: { code: 'BAD_REQUEST', message: 'Request body must be a JSON object' } },
+          400
+        );
+      }
 
       // Execute tool
       const result = await executeTool(toolName, args, context);

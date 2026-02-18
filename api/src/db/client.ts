@@ -58,6 +58,11 @@ export async function withUserSchema<T>(
   userId: string,
   callback: (tx: TransactionSql) => Promise<T>
 ): Promise<T> {
+  // Strict UUID validation to prevent SQL injection via search_path
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+    throw new Error('Invalid userId format: must be a UUID');
+  }
+
   // Remove hyphens from UUID for schema name
   const schemaName = `user_${userId.replace(/-/g, '')}`;
 
@@ -65,7 +70,7 @@ export async function withUserSchema<T>(
   // SET LOCAL ensures search_path is automatically reset after transaction
   const result = await sql.begin(async (rawTx) => {
     const tx = rawTx as TransactionSql;
-    await tx.unsafe(`SET LOCAL search_path TO ${schemaName}, public`);
+    await tx.unsafe(`SET LOCAL search_path TO "${schemaName}", public`);
     return await callback(tx);
   });
 

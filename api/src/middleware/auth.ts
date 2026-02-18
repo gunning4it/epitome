@@ -40,7 +40,8 @@ export const authResolver: MiddlewareHandler = async (c: Context, next: Next) =>
   logger.debug('authResolver middleware START');
 
   // In test env, allow test headers set by integration/load test helpers.
-  if (process.env.NODE_ENV === 'test') {
+  // L-4 SECURITY FIX: Block test auth bypass when DEPLOYED is set (staging/prod)
+  if (process.env.NODE_ENV === 'test' && !process.env.DEPLOYED) {
     // Hono uses Web Standards Headers API
     const testUserId = c.req.header('x-test-user-id');
     const testAgentId = c.req.header('x-test-agent-id');

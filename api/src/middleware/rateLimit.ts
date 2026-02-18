@@ -30,8 +30,10 @@ export async function rateLimitMiddleware(c: Context<HonoEnv>, next: Next) {
   const userId = c.get('userId');
   const agentId = c.get('agentId');
   const authType = c.get('authType');
-  const ip = c.req.header('x-forwarded-for')?.split(',')[0].trim() ||
-             c.req.header('x-real-ip') ||
+  const ip = c.req.header('fly-client-ip') ||
+             (process.env.TRUST_PROXY === 'true'
+               ? c.req.header('x-forwarded-for')?.split(',')[0].trim()
+               : undefined) ||
              'unknown';
 
   const isMcpTool = c.req.path.startsWith('/mcp');
@@ -92,8 +94,10 @@ export async function expensiveOperationRateLimit(
 ) {
   const userId = c.get('userId');
   const agentId = c.get('agentId');
-  const ip = c.req.header('x-forwarded-for')?.split(',')[0].trim() ||
-             c.req.header('x-real-ip') ||
+  const ip = c.req.header('fly-client-ip') ||
+             (process.env.TRUST_PROXY === 'true'
+               ? c.req.header('x-forwarded-for')?.split(',')[0].trim()
+               : undefined) ||
              'unknown';
 
   // More restrictive limits for expensive operations
