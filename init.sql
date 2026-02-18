@@ -3,7 +3,7 @@
 -- =====================================================
 -- Version: 1.0
 -- PostgreSQL: 17.7
--- Extensions: pgvector 0.8+, pg_trgm, pg_cron 1.6+
+-- Extensions: pgvector 0.8+, pg_trgm, pg_cron 1.6+ (optional)
 --
 -- This script initializes the Epitome database with:
 -- 1. Required PostgreSQL extensions
@@ -16,7 +16,17 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "vector";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
-CREATE EXTENSION IF NOT EXISTS "pg_cron";
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron') THEN
+    CREATE EXTENSION IF NOT EXISTS "pg_cron";
+  ELSE
+    RAISE NOTICE 'pg_cron extension is not available in this PostgreSQL build; continuing without it.';
+  END IF;
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE 'Skipping pg_cron extension setup: %', SQLERRM;
+END $$;
 
 -- =====================================================
 -- PUBLIC SCHEMA: MULTI-TENANT SYSTEM TABLES
@@ -805,7 +815,7 @@ $$ LANGUAGE plpgsql;
 DO $$
 BEGIN
   RAISE NOTICE 'Epitome database initialization complete!';
-  RAISE NOTICE 'Extensions enabled: uuid-ossp, vector (pgvector), pg_trgm, pg_cron';
+  RAISE NOTICE 'Extensions enabled: uuid-ossp, vector (pgvector), pg_trgm; pg_cron if available';
   RAISE NOTICE 'Public schema tables created: users, api_keys, sessions, oauth_connections, oauth_clients, oauth_authorization_codes, agent_registry, system_config';
   RAISE NOTICE 'User schema creation function: public.create_user_schema(schema_name, embedding_dim)';
   RAISE NOTICE 'Batch extraction function: public.epitome_batch_extract_entities(user_schema, limit)';

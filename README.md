@@ -6,7 +6,7 @@ A personal AI database, portable identity layer, and knowledge graph that gives 
 
 - **Runtime:** Node.js ≥ 22 LTS
 - **API Framework:** Hono 4.11.x
-- **Database:** PostgreSQL 17.7 with pgvector 0.8.x, pg_trgm, pg_cron 1.6.x
+- **Database:** PostgreSQL 17.7 with pgvector 0.8.x, pg_trgm, and optional pg_cron 1.6.x
 - **ORM:** Drizzle ORM 0.39.x
 - **MCP Server:** @modelcontextprotocol/sdk 1.26.x
 - **Frontend:** React 19.x + Tailwind CSS 4.x + shadcn/ui 3.x
@@ -99,7 +99,7 @@ Each user gets an isolated PostgreSQL schema (`user_{id}`) containing:
 docker compose exec postgres psql -U postgres -d epitome_dev
 
 # Check extensions
-SELECT * FROM pg_extension WHERE extname IN ('vector', 'pg_trgm', 'pg_cron', 'uuid-ossp');
+SELECT * FROM pg_extension WHERE extname IN ('vector', 'pg_trgm', 'uuid-ossp');
 
 # Expected output:
 #   extname   | extversion
@@ -107,7 +107,6 @@ SELECT * FROM pg_extension WHERE extname IN ('vector', 'pg_trgm', 'pg_cron', 'uu
 #  uuid-ossp  | 1.1
 #  vector     | 0.8.x
 #  pg_trgm    | 1.6
-#  pg_cron    | 1.6.x
 
 # Check public schema tables
 SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;

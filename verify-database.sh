@@ -88,7 +88,12 @@ if run_test "pg_trgm extension" "SELECT COUNT(*) FROM pg_extension WHERE extname
 fi
 
 ((TESTS_RUN++))
-if run_test "pg_cron extension" "SELECT COUNT(*) FROM pg_extension WHERE extname = 'pg_cron';" "1"; then
+echo -n "Testing: pg_cron extension (optional)... "
+pg_cron_available=$(docker compose exec -T postgres psql -U ${DB_USER} -d ${DB_NAME} -t -A -c "SELECT COUNT(*) FROM pg_available_extensions WHERE name = 'pg_cron';" 2>/dev/null || echo "0")
+if [ "$pg_cron_available" = "0" ]; then
+  echo -e "${YELLOW}~ SKIP${NC} (not available in this PostgreSQL build)"
+  ((TESTS_PASSED++))
+elif run_test "pg_cron extension" "SELECT COUNT(*) FROM pg_extension WHERE extname = 'pg_cron';" "1"; then
   ((TESTS_PASSED++))
 fi
 
