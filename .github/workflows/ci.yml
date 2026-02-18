@@ -364,13 +364,13 @@ jobs:
         working-directory: ./api
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --app epitome-prod-api
+        run: flyctl deploy --config fly.prod.toml
 
       - name: Deploy Dashboard
         working-directory: ./dashboard
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --app epitome-prod-dashboard
+        run: flyctl deploy --config fly.prod.toml
 
       - name: Verify deployment
         run: |
