@@ -105,9 +105,9 @@ SELECT * FROM pg_extension WHERE extname IN ('vector', 'pg_trgm', 'pg_cron', 'uu
 #   extname   | extversion
 # ------------+------------
 #  uuid-ossp  | 1.1
-#  vector     | 0.8.0
+#  vector     | 0.8.x
 #  pg_trgm    | 1.6
-#  pg_cron    | 1.6.0
+#  pg_cron    | 1.6.x
 
 # Check public schema tables
 SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
