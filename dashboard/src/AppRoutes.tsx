@@ -34,6 +34,14 @@ const Contributing = lazy(() => import('@/pages/docs/Contributing'));
 const Troubleshooting = lazy(() => import('@/pages/docs/Troubleshooting'));
 const Security = lazy(() => import('@/pages/docs/Security'));
 
+// Legal pages — lazy loaded
+const LegalLayout = lazy(() => import('@/components/legal/LegalLayout'));
+const PrivacyPolicy = lazy(() => import('@/pages/legal/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('@/pages/legal/TermsOfService'));
+const SecurityCompliance = lazy(() => import('@/pages/legal/SecurityCompliance'));
+const CookiePolicy = lazy(() => import('@/pages/legal/CookiePolicy'));
+const CcpaPolicy = lazy(() => import('@/pages/legal/CcpaPolicy'));
+
 function LoadingSpinner() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
@@ -75,6 +83,16 @@ export default function AppRoutes() {
         <Route path="contributing" element={<Contributing />} />
         <Route path="troubleshooting" element={<Troubleshooting />} />
         <Route path="security" element={<Security />} />
+      </Route>
+
+      {/* Legal pages */}
+      <Route path="/legal" element={<LegalLayout />}>
+        <Route index element={<Navigate to="/legal/privacy" replace />} />
+        <Route path="privacy" element={<PrivacyPolicy />} />
+        <Route path="terms" element={<TermsOfService />} />
+        <Route path="security" element={<SecurityCompliance />} />
+        <Route path="cookies" element={<CookiePolicy />} />
+        <Route path="ccpa" element={<CcpaPolicy />} />
       </Route>
 
       {/* Auth-gated dashboard routes */}

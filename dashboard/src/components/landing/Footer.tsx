@@ -30,6 +30,16 @@ const COLUMNS = [
       { label: 'Contributing', href: '/docs/contributing', external: false },
     ],
   },
+  {
+    title: 'Legal',
+    links: [
+      { label: 'Privacy Policy', href: '/legal/privacy', external: false },
+      { label: 'Terms of Service', href: '/legal/terms', external: false },
+      { label: 'Security', href: '/legal/security', external: false },
+      { label: 'Cookies', href: '/legal/cookies', external: false },
+      { label: 'CCPA', href: '/legal/ccpa', external: false },
+    ],
+  },
 ];
 
 const TECH_BADGES = ['React', 'PostgreSQL', 'Hono', 'D3.js'];
@@ -42,7 +52,7 @@ export default function Footer() {
 
       <div className="mx-auto max-w-6xl px-6">
         {/* Link columns */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-10 mb-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10 mb-12">
           {COLUMNS.map((col) => (
             <div key={col.title}>
               <h4 className="text-sm font-semibold text-foreground mb-4">

@@ -56,7 +56,24 @@ export default function Onboarding() {
         </button>
 
         <p className="text-sm text-neutral-500">
-          Sign in to get started
+          By signing up, you agree to our{' '}
+          <a
+            href="/legal/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-neutral-300 underline underline-offset-2 hover:text-white transition-colors"
+          >
+            Terms of Service
+          </a>{' '}
+          and{' '}
+          <a
+            href="/legal/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-neutral-300 underline underline-offset-2 hover:text-white transition-colors"
+          >
+            Privacy Policy
+          </a>
         </p>
       </div>
     </div>

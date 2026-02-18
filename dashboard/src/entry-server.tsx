@@ -16,7 +16,14 @@ import Contributing from '@/pages/docs/Contributing';
 import Troubleshooting from '@/pages/docs/Troubleshooting';
 import Security from '@/pages/docs/Security';
 
-import { Routes, Route } from 'react-router-dom';
+import LegalLayout from '@/components/legal/LegalLayout';
+import PrivacyPolicy from '@/pages/legal/PrivacyPolicy';
+import TermsOfService from '@/pages/legal/TermsOfService';
+import SecurityCompliance from '@/pages/legal/SecurityCompliance';
+import CookiePolicy from '@/pages/legal/CookiePolicy';
+import CcpaPolicy from '@/pages/legal/CcpaPolicy';
+
+import { Routes, Route, Navigate } from 'react-router-dom';
 
 // Public-only routes for SSR — no auth-gated routes, no lazy loading
 function PublicRoutes() {
@@ -34,6 +41,14 @@ function PublicRoutes() {
         <Route path="contributing" element={<Contributing />} />
         <Route path="troubleshooting" element={<Troubleshooting />} />
         <Route path="security" element={<Security />} />
+      </Route>
+      <Route path="/legal" element={<LegalLayout />}>
+        <Route index element={<Navigate to="/legal/privacy" replace />} />
+        <Route path="privacy" element={<PrivacyPolicy />} />
+        <Route path="terms" element={<TermsOfService />} />
+        <Route path="security" element={<SecurityCompliance />} />
+        <Route path="cookies" element={<CookiePolicy />} />
+        <Route path="ccpa" element={<CcpaPolicy />} />
       </Route>
     </Routes>
   );
