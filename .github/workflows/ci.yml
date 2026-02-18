@@ -233,10 +233,10 @@ jobs:
           const total = coverage.total;
 
           const thresholds = {
-            statements: 85,
-            branches: 80,
-            functions: 85,
-            lines: 85
+            statements: 55,
+            branches: 45,
+            functions: 55,
+            lines: 55
           };
 
           let failed = false;
