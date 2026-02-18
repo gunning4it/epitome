@@ -1,0 +1,57 @@
+{
+  "name": "@epitome/api",
+  "version": "1.0.0",
+  "description": "Epitome API Server - Hono REST API with OAuth, MCP, and knowledge graph",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:load": "RUN_LOAD_TESTS=true vitest run tests/load",
+    "test:coverage": "vitest --coverage",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "hono",
+    "api",
+    "mcp",
+    "oauth",
+    "postgresql"
+  ],
+  "author": "Epitome",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.7.6",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "argon2": "^0.44.0",
+    "better-auth": "^1.4.18",
+    "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.1",
+    "hono": "^4.11.9",
+    "pgsql-parser": "^17.9.11",
+    "pgvector": "^0.2.1",
+    "postgres": "^3.4.8",
+    "rate-limiter-flexible": "^9.1.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.19.9",
+    "@types/node": "^22.19.11",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.2.2",
+    "tsc-alias": "^1.8.16",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.0.18"
+  }
+}

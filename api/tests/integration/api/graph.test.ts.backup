@@ -1,0 +1,524 @@
+/**
+ * Integration Tests - Graph API Endpoints
+ *
+ * Tests knowledge graph endpoints:
+ * - GET /v1/graph/entities
+ * - GET /v1/graph/entities/:id
+ * - GET /v1/graph/entities/:id/neighbors
+ * - POST /v1/graph/traverse
+ * - POST /v1/graph/query
+ * - POST /v1/graph/pattern
+ * - GET /v1/graph/stats
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import app from '@/index';
+import { createTestUser, cleanupTestUser, type TestUser, factories } from '../../helpers/db';
+import { createBearerToken, createTestAuthHeaders } from '../../helpers/app';
+import { sql } from 'drizzle-orm';
+import { db } from '@/db';
+
+describe('Graph API Integration Tests', () => {
+  let testUser: TestUser;
+  let aliceId: string;
+  let bobId: string;
+  let charlieId: string;
+
+  beforeEach(async () => {
+    testUser = await createTestUser();
+
+    // Create test graph (using actual schema column names: type, name, properties)
+    const aliceResult = await db.execute(sql.raw(`
+      INSERT INTO ${testUser.schemaName}.entities
+      (type, name, properties, mention_count)
+      VALUES ('Person', 'Alice', '{"aliases": ["Alice Smith"]}'::jsonb, 3)
+      RETURNING id
+    `));
+    aliceId = (aliceResult[0] as any).id;
+
+    const bobResult = await db.execute(sql.raw(`
+      INSERT INTO ${testUser.schemaName}.entities
+      (type, name, properties, mention_count)
+      VALUES ('Person', 'Bob', '{}'::jsonb, 2)
+      RETURNING id
+    `));
+    bobId = (bobResult[0] as any).id;
+
+    const charlieResult = await db.execute(sql.raw(`
+      INSERT INTO ${testUser.schemaName}.entities
+      (type, name, properties, mention_count)
+      VALUES ('Person', 'Charlie', '{}'::jsonb, 1)
+      RETURNING id
+    `));
+    charlieId = (charlieResult[0] as any).id;
+
+    // Create edges (using actual schema column names: source_id, target_id, relation)
+    await db.execute(sql.raw(`
+      INSERT INTO ${testUser.schemaName}.edges
+      (source_id, target_id, relation, weight)
+      VALUES
+      (${aliceId}, ${bobId}, 'FRIEND_OF', 1.5),
+      (${bobId}, ${charlieId}, 'COLLEAGUE_OF', 1.0)
+    `));
+  });
+
+  afterEach(async () => {
+    await cleanupTestUser(testUser.userId);
+  });
+
+  describe('GET /v1/graph/entities', () => {
+    it('should return all entities', async () => {
+      const headers = createTestAuthHeaders(testUser);
+      const response = await app.request('/v1/graph/entities', {
+        method: 'GET',
+        headers,
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.entities).toBeInstanceOf(Array);
+      expect(data.entities.length).toBe(3);
+    });
+
+    it('should filter by type', async () => {
+      // Add a Location entity
+      await db.execute(sql.raw(`
+        INSERT INTO ${testUser.schemaName}.entities
+        (type, name)
+        VALUES ('Location', 'New York')
+      `));
+
+      const response = await request(app.fetch as any)
+        .get('/v1/graph/entities?type=Person')
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.entities.length).toBe(3); // Only Persons
+      expect(response.body.entities.every((e: any) => e.type === 'Person')).toBe(true);
+    });
+
+    it('should paginate results', async () => {
+      const response = await request(app.fetch as any)
+        .get('/v1/graph/entities?limit=2')
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.entities.length).toBe(2);
+    });
+
+    it('should exclude soft-deleted entities', async () => {
+      // Soft-delete Bob
+      await db.execute(sql.raw(`
+        UPDATE ${testUser.schemaName}.entities
+        SET _deleted_at = NOW()
+        WHERE id = '${bobId}'
+      `));
+
+      const response = await request(app.fetch as any)
+        .get('/v1/graph/entities')
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.entities.length).toBe(2); // Alice and Charlie only
+    });
+
+    it('should return 401 without authentication', async () => {
+      const response = await request(app.fetch as any).get('/v1/graph/entities');
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe('GET /v1/graph/entities/:id', () => {
+    it('should return entity details', async () => {
+      const response = await request(app.fetch as any)
+        .get(`/v1/graph/entities/${aliceId}`)
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.id).toBe(aliceId);
+      expect(response.body.name).toBe('Alice');
+      expect(response.body.type).toBe('Person');
+      expect(response.body.aliases).toEqual(['Alice Smith']);
+    });
+
+    it('should return 404 for non-existent entity', async () => {
+      const fakeId = '00000000-0000-0000-0000-000000000000';
+
+      const response = await request(app.fetch as any)
+        .get(`/v1/graph/entities/${fakeId}`)
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(404);
+    });
+
+    it('should return 404 for soft-deleted entity', async () => {
+      // Soft-delete Alice
+      await db.execute(sql.raw(`
+        UPDATE ${testUser.schemaName}.entities
+        SET _deleted_at = NOW()
+        WHERE id = '${aliceId}'
+      `));
+
+      const response = await request(app.fetch as any)
+        .get(`/v1/graph/entities/${aliceId}`)
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(404);
+    });
+
+    it('should return 401 without authentication', async () => {
+      const response = await request(app.fetch as any).get(`/v1/graph/entities/${aliceId}`);
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe('GET /v1/graph/entities/:id/neighbors', () => {
+    it('should return direct neighbors', async () => {
+      const response = await request(app.fetch as any)
+        .get(`/v1/graph/entities/${aliceId}/neighbors`)
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.neighbors).toBeInstanceOf(Array);
+      expect(response.body.neighbors.length).toBe(1); // Bob
+      expect(response.body.neighbors[0].entity.name).toBe('Bob');
+      expect(response.body.neighbors[0].relation).toBe('FRIEND_OF');
+    });
+
+    it('should filter by relation', async () => {
+      // Add another edge with different type
+      await db.execute(sql.raw(`
+        INSERT INTO ${testUser.schemaName}.edges
+        (source_id, target_id, relation, weight)
+        VALUES ('${aliceId}', '${charlieId}', 'COLLEAGUE_OF', 1.0)
+      `));
+
+      const response = await request(app.fetch as any)
+        .get(`/v1/graph/entities/${aliceId}/neighbors?relation=FRIEND_OF`)
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.neighbors.length).toBe(1);
+      expect(response.body.neighbors[0].relation).toBe('FRIEND_OF');
+    });
+
+    it('should return empty array for entity with no neighbors', async () => {
+      const response = await request(app.fetch as any)
+        .get(`/v1/graph/entities/${charlieId}/neighbors`)
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.neighbors).toEqual([]);
+    });
+
+    it('should return 404 for non-existent entity', async () => {
+      const fakeId = '00000000-0000-0000-0000-000000000000';
+
+      const response = await request(app.fetch as any)
+        .get(`/v1/graph/entities/${fakeId}/neighbors`)
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(404);
+    });
+
+    it('should return 401 without authentication', async () => {
+      const response = await request(app.fetch as any).get(`/v1/graph/entities/${aliceId}/neighbors`);
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe('POST /v1/graph/traverse', () => {
+    it('should perform multi-hop traversal', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/traverse')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          start_entity_id: aliceId,
+          max_depth: 2,
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.paths).toBeInstanceOf(Array);
+      expect(response.body.paths.length).toBeGreaterThan(0);
+    });
+
+    it('should respect max_depth parameter', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/traverse')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          start_entity_id: aliceId,
+          max_depth: 1,
+        });
+
+      expect(response.status).toBe(200);
+      // Paths should only be 1 hop deep
+      expect(response.body.paths.every((p: any) => p.length <= 2)).toBe(true); // start + 1 hop
+    });
+
+    it('should filter by relations', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/traverse')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          start_entity_id: aliceId,
+          max_depth: 2,
+          relations: ['FRIEND_OF'],
+        });
+
+      expect(response.status).toBe(200);
+      // All edges in paths should be FRIEND_OF
+      for (const path of response.body.paths) {
+        for (const hop of path.slice(1)) {
+          // Skip first element (start node)
+          if (hop.relation) {
+            expect(hop.relation).toBe('FRIEND_OF');
+          }
+        }
+      }
+    });
+
+    it('should return 404 for non-existent start entity', async () => {
+      const fakeId = '00000000-0000-0000-0000-000000000000';
+
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/traverse')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          start_entity_id: fakeId,
+          max_depth: 2,
+        });
+
+      expect(response.status).toBe(404);
+    });
+
+    it('should return 400 with invalid max_depth', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/traverse')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          start_entity_id: aliceId,
+          max_depth: -1,
+        });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should return 401 without authentication', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/traverse')
+        .send({
+          start_entity_id: aliceId,
+          max_depth: 2,
+        });
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe('POST /v1/graph/query', () => {
+    it('should query entities by name', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/query')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          query: 'Alice',
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.results).toBeInstanceOf(Array);
+      expect(response.body.results.some((r: any) => r.name === 'Alice')).toBe(true);
+    });
+
+    it('should search aliases', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/query')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          query: 'Alice Smith', // This is an alias
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.results.some((r: any) => r.name === 'Alice')).toBe(true);
+    });
+
+    it('should filter by type', async () => {
+      // Add a Location entity
+      await db.execute(sql.raw(`
+        INSERT INTO ${testUser.schemaName}.entities
+        (type, name)
+        VALUES ('Location', 'Alice Springs')
+      `));
+
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/query')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          query: 'Alice',
+          type: 'Person',
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.results.every((r: any) => r.type === 'Person')).toBe(true);
+    });
+
+    it('should limit results', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/query')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          query: 'e', // Match multiple entities
+          limit: 1,
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.results.length).toBeLessThanOrEqual(1);
+    });
+
+    it('should return empty array for no matches', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/query')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          query: 'NonexistentEntity',
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.results).toEqual([]);
+    });
+
+    it('should return 401 without authentication', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/query')
+        .send({
+          query: 'Alice',
+        });
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe('POST /v1/graph/pattern', () => {
+    it('should find pattern matches', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/pattern')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          pattern: {
+            type: 'Person',
+            edges: [{ relation: 'FRIEND_OF' }],
+          },
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.matches).toBeInstanceOf(Array);
+    });
+
+    it('should match multi-hop patterns', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/pattern')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          pattern: {
+            type: 'Person',
+            edges: [
+              { relation: 'FRIEND_OF' },
+              { relation: 'COLLEAGUE_OF' },
+            ],
+          },
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.matches).toBeInstanceOf(Array);
+      // Should find Alice -> Bob -> Charlie path
+      expect(response.body.matches.length).toBeGreaterThan(0);
+    });
+
+    it('should return empty array when no pattern matches', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/pattern')
+        .set(createTestAuthHeaders(testUser))
+        .send({
+          pattern: {
+            type: 'Location',
+            edges: [{ relation: 'FRIEND_OF' }],
+          },
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.matches).toEqual([]);
+    });
+
+    it('should return 401 without authentication', async () => {
+      const response = await request(app.fetch as any)
+        .post('/v1/graph/pattern')
+        .send({
+          pattern: {
+            type: 'Person',
+          },
+        });
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe('GET /v1/graph/stats', () => {
+    it('should return graph statistics', async () => {
+      const response = await request(app.fetch as any)
+        .get('/v1/graph/stats')
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('total_entities');
+      expect(response.body).toHaveProperty('total_edges');
+      expect(response.body).toHaveProperty('types');
+      expect(response.body).toHaveProperty('relations');
+    });
+
+    it('should count entities correctly', async () => {
+      const response = await request(app.fetch as any)
+        .get('/v1/graph/stats')
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.total_entities).toBe(3);
+    });
+
+    it('should count edges correctly', async () => {
+      const response = await request(app.fetch as any)
+        .get('/v1/graph/stats')
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.total_edges).toBe(2);
+    });
+
+    it('should break down entity types', async () => {
+      const response = await request(app.fetch as any)
+        .get('/v1/graph/stats')
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.types).toHaveProperty('Person', 3);
+    });
+
+    it('should break down edge types', async () => {
+      const response = await request(app.fetch as any)
+        .get('/v1/graph/stats')
+        .set(createTestAuthHeaders(testUser));
+
+      expect(response.status).toBe(200);
+      expect(response.body.relations).toHaveProperty('FRIEND_OF', 1);
+      expect(response.body.relations).toHaveProperty('COLLEAGUE_OF', 1);
+    });
+
+    it('should return 401 without authentication', async () => {
+      const response = await request(app.fetch as any).get('/v1/graph/stats');
+
+      expect(response.status).toBe(401);
+    });
+  });
+});

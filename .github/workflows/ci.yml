@@ -1,0 +1,380 @@
+name: Epitome CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  release:
+    types: [created]
+
+env:
+  NODE_VERSION: '22'
+  POSTGRES_VERSION: '17'
+
+jobs:
+  # Job 1: Unit Tests
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./api
+        run: npm ci
+
+      - name: Run unit tests
+        working-directory: ./api
+        run: npm run test:unit
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: api/coverage/
+
+  # Job 2: Integration Tests
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: epitome_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Initialize database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d epitome_test -f init.sql
+
+      - name: Install dependencies
+        working-directory: ./api
+        run: npm ci
+
+      - name: Run integration tests
+        working-directory: ./api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/epitome_test
+          SESSION_TTL_DAYS: 7
+          JWT_SECRET: test-secret-key-for-ci
+          DB_POOL_SIZE: 1
+        run: npm run test:integration
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: api/coverage/
+
+  # Job 3: Load Tests (only on release)
+  load-tests:
+    name: Load Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: epitome_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_MAX_CONNECTIONS: 300
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Initialize database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d epitome_test -f init.sql
+
+      - name: Install dependencies
+        working-directory: ./api
+        run: npm ci
+
+      - name: Run load tests
+        working-directory: ./api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/epitome_test
+          SESSION_TTL_DAYS: 7
+          JWT_SECRET: test-secret-key-for-ci
+          DB_POOL_SIZE: 50
+          RUN_LOAD_TESTS: "true"
+        run: npm run test:load
+
+      - name: Upload load test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: api/coverage/
+
+  # Job 4: Code Coverage
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: epitome_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Initialize database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d epitome_test -f init.sql
+
+      - name: Install dependencies
+        working-directory: ./api
+        run: npm ci
+
+      - name: Run tests with coverage
+        working-directory: ./api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/epitome_test
+          SESSION_TTL_DAYS: 7
+          JWT_SECRET: test-secret-key-for-ci
+          DB_POOL_SIZE: 1
+        run: npm test -- --coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./api/coverage/coverage-final.json
+          flags: api
+          name: epitome-api-coverage
+
+      - name: Check coverage thresholds
+        working-directory: ./api
+        run: |
+          # Parse coverage report and check against thresholds
+          node -e "
+          const fs = require('fs');
+          const coverage = JSON.parse(fs.readFileSync('coverage/coverage-summary.json'));
+          const total = coverage.total;
+
+          const thresholds = {
+            statements: 85,
+            branches: 80,
+            functions: 85,
+            lines: 85
+          };
+
+          let failed = false;
+          for (const [metric, threshold] of Object.entries(thresholds)) {
+            const pct = total[metric].pct;
+            if (pct < threshold) {
+              console.error(\`Coverage for \${metric} (\${pct}%) is below threshold (\${threshold}%)\`);
+              failed = true;
+            }
+          }
+
+          if (failed) process.exit(1);
+          "
+
+  # Job 6: Linting & Type Checking
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./api
+        run: npm ci
+
+      - name: Run TypeScript type check
+        working-directory: ./api
+        run: npm run lint
+
+  # Job 7: Security Audit
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Run npm audit
+        working-directory: ./api
+        run: npm audit --audit-level=critical
+
+      - name: Run dependency check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'epitome'
+          path: '.'
+          format: 'HTML'
+
+  # Job 8: Build Verification
+  build:
+    name: Build Verification
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests]
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./api
+        run: npm ci
+
+      - name: Build API
+        working-directory: ./api
+        run: npm run build
+
+      - name: Install Dashboard dependencies
+        working-directory: ./dashboard
+        run: npm ci
+
+      - name: Build Dashboard
+        working-directory: ./dashboard
+        run: npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            api/dist/
+            dashboard/dist/
+
+  # Job 9: Deployment (only on main branch)
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, coverage, integration-tests]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    timeout-minutes: 10
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          npm install -g @railway/cli
+          railway up
+
+      - name: Verify deployment
+        run: |
+          curl -f https://api.epitome.fyi/health || exit 1
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "Deployment successful!"
+          # Add Slack/Discord notification here if desired
