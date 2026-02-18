@@ -76,7 +76,7 @@ export default function BetterTogetherSection() {
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 Deploy AI agents locally on your hardware. Task execution, home automation,
-                messaging — all running on your own machines.
+                messaging — on your machine.
               </p>
             </a>
           </motion.div>
