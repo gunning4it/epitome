@@ -81,7 +81,7 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h localhost -U postgres -d epitome_test -f init.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d epitome_test -f init.sql
 
       - name: Install dependencies
         working-directory: ./api
@@ -141,7 +141,7 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h localhost -U postgres -d epitome_test -f init.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d epitome_test -f init.sql
 
       - name: Install dependencies
         working-directory: ./api
@@ -201,7 +201,7 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h localhost -U postgres -d epitome_test -f init.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d epitome_test -f init.sql
 
       - name: Install dependencies
         working-directory: ./api

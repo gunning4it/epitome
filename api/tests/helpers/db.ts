@@ -32,6 +32,9 @@ export async function createTestUser(embeddingDim: number = 1536): Promise<TestU
     ALTER TABLE public.api_keys ADD COLUMN IF NOT EXISTS tier VARCHAR(20) NOT NULL DEFAULT 'free'
   `));
 
+  // Ensure pgvector extension is available for vector(embeddingDim) columns.
+  await db.execute(sql.raw(`CREATE EXTENSION IF NOT EXISTS vector`));
+
   // Create user in public.users table
   await db.execute(sql`
     INSERT INTO public.users (id, email, schema_name, created_at)

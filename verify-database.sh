@@ -78,7 +78,7 @@ fi
 # Test 2: Required Extensions
 # =====================================================
 ((TESTS_RUN++))
-if run_test "pgvector extension" "SELECT extversion FROM pg_extension WHERE extname = 'pgvector';" "0.8"; then
+if run_test "pgvector extension" "SELECT extversion FROM pg_extension WHERE extname = 'vector';" "0.8"; then
   ((TESTS_PASSED++))
 fi
 

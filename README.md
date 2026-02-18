@@ -99,13 +99,13 @@ Each user gets an isolated PostgreSQL schema (`user_{id}`) containing:
 docker compose exec postgres psql -U postgres -d epitome_dev
 
 # Check extensions
-SELECT * FROM pg_extension WHERE extname IN ('pgvector', 'pg_trgm', 'pg_cron', 'uuid-ossp');
+SELECT * FROM pg_extension WHERE extname IN ('vector', 'pg_trgm', 'pg_cron', 'uuid-ossp');
 
 # Expected output:
 #   extname   | extversion
 # ------------+------------
 #  uuid-ossp  | 1.1
-#  pgvector   | 0.8.0
+#  vector     | 0.8.0
 #  pg_trgm    | 1.6
 #  pg_cron    | 1.6.0
 

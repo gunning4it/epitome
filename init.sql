@@ -14,7 +14,7 @@
 
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgvector" WITH VERSION '0.8.0';
+CREATE EXTENSION IF NOT EXISTS "vector" WITH VERSION '0.8.0';
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 CREATE EXTENSION IF NOT EXISTS "pg_cron" WITH VERSION '1.6.0';
 
@@ -805,7 +805,7 @@ $$ LANGUAGE plpgsql;
 DO $$
 BEGIN
   RAISE NOTICE 'Epitome database initialization complete!';
-  RAISE NOTICE 'Extensions enabled: uuid-ossp, pgvector 0.8.0, pg_trgm, pg_cron 1.6.0';
+  RAISE NOTICE 'Extensions enabled: uuid-ossp, vector (pgvector) 0.8.0, pg_trgm, pg_cron 1.6.0';
   RAISE NOTICE 'Public schema tables created: users, api_keys, sessions, oauth_connections, oauth_clients, oauth_authorization_codes, agent_registry, system_config';
   RAISE NOTICE 'User schema creation function: public.create_user_schema(schema_name, embedding_dim)';
   RAISE NOTICE 'Batch extraction function: public.epitome_batch_extract_entities(user_schema, limit)';
