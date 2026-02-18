@@ -199,7 +199,10 @@ auth.get('/callback', zValidator('query', callbackQuerySchema), async (c) => {
   setCookie(c, 'epitome_session', session.token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'Lax', // H-4 SECURITY FIX: Always use Lax, never None
+    // Lax when COOKIE_DOMAIN is set (prod: shared eTLD+1)
+    // None when cross-site in production (staging: fly.dev PSL)
+    // Lax for local dev
+    sameSite: process.env.COOKIE_DOMAIN ? 'Lax' : (process.env.NODE_ENV === 'production' ? 'None' : 'Lax'),
     maxAge: sessionTtlDays * 24 * 60 * 60,
     path: '/',
     domain: process.env.COOKIE_DOMAIN || undefined,
@@ -324,7 +327,7 @@ auth.post('/refresh', async (c) => {
   setCookie(c, 'epitome_session', session.token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'Lax', // H-4 SECURITY FIX: Always use Lax, never None
+    sameSite: process.env.COOKIE_DOMAIN ? 'Lax' : (process.env.NODE_ENV === 'production' ? 'None' : 'Lax'),
     maxAge: sessionTtlDays * 24 * 60 * 60,
     path: '/',
     domain: process.env.COOKIE_DOMAIN || undefined,
