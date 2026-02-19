@@ -194,7 +194,7 @@ POST /mcp/call/query_graph         - Graph traversal`;
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onDone(); }}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <div className="rounded-full bg-green-500/20 p-1">
