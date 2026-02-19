@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS public.system_config (
 INSERT INTO public.system_config (key, value) VALUES
   ('default_embedding_provider', '"openai"'),
   ('default_embedding_dim', '1536'),
-  ('free_tier_limits', '{"max_tables": 5, "max_agents": 3, "max_graph_entities": 100, "audit_retention_days": 30}'),
+  ('free_tier_limits', '{"max_tables": 2, "max_agents": 3, "max_graph_entities": 100, "audit_retention_days": 30}'),
   ('pro_tier_limits', '{"max_tables": -1, "max_agents": -1, "max_graph_entities": -1, "audit_retention_days": 365}'),
   ('maintenance_mode', 'false')
 ON CONFLICT (key) DO NOTHING;
