@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import type { McpContext } from './server.js';
 
-// Tool handlers
+// Tool handlers (legacy path)
 import { getUserContext } from './tools/getUserContext.js';
 import { updateProfile } from './tools/updateProfile.js';
 import { listTables } from './tools/listTables.js';
@@ -21,6 +21,26 @@ import { searchMemory } from './tools/searchMemory.js';
 import { saveMemory } from './tools/saveMemory.js';
 import { queryGraph } from './tools/queryGraph.js';
 import { reviewMemories } from './tools/reviewMemories.js';
+
+// Service layer (feature-flagged path)
+import * as toolServices from '@/services/tools/index.js';
+import { mcpAdapter } from '@/services/tools/adapters.js';
+import { buildToolContext } from '@/services/tools/context.js';
+
+const USE_SERVICE_LAYER = process.env.MCP_USE_SERVICE_LAYER === 'true';
+
+// Map tool names to service functions
+const SERVICE_MAP: Record<string, (args: any, ctx: toolServices.ToolContext) => Promise<toolServices.ToolResult>> = {
+  get_user_context: toolServices.getUserContext,
+  update_profile: toolServices.updateProfile,
+  list_tables: toolServices.listTables,
+  query_table: toolServices.queryTable,
+  add_record: toolServices.addRecord,
+  search_memory: toolServices.searchMemory,
+  save_memory: toolServices.saveMemory,
+  query_graph: toolServices.queryGraph,
+  review_memories: toolServices.reviewMemories,
+};
 
 /**
  * Extract userId and agentId from the transport's authInfo.extra
@@ -40,12 +60,29 @@ function extractContext(extra: Record<string, unknown>): McpContext {
 
 /**
  * Wrap a tool handler: extract auth context, call handler, return CallToolResult format.
+ * When USE_SERVICE_LAYER is true and toolName is provided, routes through the
+ * transport-agnostic service layer instead of the legacy handler.
  */
 async function callTool(
   handler: (args: any, context: McpContext) => Promise<unknown>,
   args: Record<string, unknown>,
   extra: Record<string, unknown>,
+  toolName?: string,
 ): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+  // Service layer path (feature-flagged)
+  if (USE_SERVICE_LAYER && toolName && SERVICE_MAP[toolName]) {
+    const rawContext = extractContext(extra);
+    const toolContext = buildToolContext({
+      userId: rawContext.userId,
+      agentId: rawContext.agentId,
+      tier: rawContext.tier,
+      authType: 'api_key',
+    });
+    const result = await SERVICE_MAP[toolName](args, toolContext);
+    return mcpAdapter(result);
+  }
+
+  // Legacy path (default)
   try {
     const context = extractContext(extra);
     const result = await handler(args, context);
@@ -82,7 +119,7 @@ export function createMcpProtocolServer(): McpServer {
         .optional()
         .describe('Optional topic for relevance ranking (e.g., "food preferences", "workout history")'),
     },
-  }, async (args, extra) => callTool(getUserContext, args, extra));
+  }, async (args, extra) => callTool(getUserContext, args, extra, 'get_user_context'));
 
   // 2. update_profile
   server.registerTool('update_profile', {
@@ -97,14 +134,14 @@ export function createMcpProtocolServer(): McpServer {
         .optional()
         .describe('Optional description of what changed (e.g., "user mentioned new allergy")'),
     },
-  }, async (args, extra) => callTool(updateProfile, args, extra));
+  }, async (args, extra) => callTool(updateProfile, args, extra, 'update_profile'));
 
   // 3. list_tables
   server.registerTool('list_tables', {
     description:
       "List all data tables the user tracks (meals, workouts, expenses, habits, etc.). Returns table names, descriptions, column schemas, and record counts. Use this to discover what data is available before querying.",
     inputSchema: {},
-  }, async (args, extra) => callTool(listTables, args, extra));
+  }, async (args, extra) => callTool(listTables, args, extra, 'list_tables'));
 
   // 4. query_table
   server.registerTool('query_table', {
@@ -124,7 +161,7 @@ export function createMcpProtocolServer(): McpServer {
       limit: z.number().optional().describe('Maximum number of results to return (default 50, max 1000)'),
       offset: z.number().optional().describe('Number of results to skip for pagination'),
     },
-  }, async (args, extra) => callTool(queryTable, args, extra));
+  }, async (args, extra) => callTool(queryTable, args, extra, 'query_table'));
 
   // 5. add_record
   server.registerTool('add_record', {
@@ -138,7 +175,7 @@ export function createMcpProtocolServer(): McpServer {
         .describe('Record data as key-value pairs (e.g., {food: "pizza", calories: 800})'),
       tableDescription: z.string().optional().describe('Optional description of the table (used on first creation)'),
     },
-  }, async (args, extra) => callTool(addRecord, args, extra));
+  }, async (args, extra) => callTool(addRecord, args, extra, 'add_record'));
 
   // 6. search_memory
   server.registerTool('search_memory', {
@@ -150,7 +187,7 @@ export function createMcpProtocolServer(): McpServer {
       minSimilarity: z.number().optional().describe('Minimum cosine similarity threshold (0-1, default 0.7)'),
       limit: z.number().optional().describe('Maximum number of results to return (default 10)'),
     },
-  }, async (args, extra) => callTool(searchMemory, args, extra));
+  }, async (args, extra) => callTool(searchMemory, args, extra, 'search_memory'));
 
   // 7. save_memory
   server.registerTool('save_memory', {
@@ -164,7 +201,7 @@ export function createMcpProtocolServer(): McpServer {
         .optional()
         .describe('Optional metadata (e.g., {topic: "food", mood: "happy"})'),
     },
-  }, async (args, extra) => callTool(saveMemory, args, extra));
+  }, async (args, extra) => callTool(saveMemory, args, extra, 'save_memory'));
 
   // 8. query_graph
   server.registerTool('query_graph', {
@@ -190,7 +227,7 @@ export function createMcpProtocolServer(): McpServer {
         .optional()
         .describe('For pattern: either natural language string or structured criteria object'),
     },
-  }, async (args, extra) => callTool(queryGraph, args, extra));
+  }, async (args, extra) => callTool(queryGraph, args, extra, 'query_graph'));
 
   // 9. review_memories
   server.registerTool('review_memories', {
@@ -206,7 +243,7 @@ export function createMcpProtocolServer(): McpServer {
         .optional()
         .describe('For resolve: "confirm" to accept, "reject" to deny, "keep_both" to mark as contextual'),
     },
-  }, async (args, extra) => callTool(reviewMemories, args, extra));
+  }, async (args, extra) => callTool(reviewMemories, args, extra, 'review_memories'));
 
   return server;
 }
