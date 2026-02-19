@@ -15,7 +15,7 @@ import { generateApiKey, generateSessionToken, hashSessionToken, encryptIfAvaila
 import { OAuthProvider } from '@/validators/auth';
 import { logger } from '@/utils/logger';
 import { initializeProfile } from '@/services/profile.service';
-import { grantConsent } from '@/services/consent.service';
+import { grantConsent, getAgentConsent } from '@/services/consent.service';
 import { TierLimitError } from '@/errors/tierLimit';
 import { getTierLimits } from './metering.service';
 
@@ -302,24 +302,45 @@ export async function createApiKeyForUser(
     })
     .returning();
 
-  // Auto-grant consent for standard resources when agentId is provided
+  // Auto-grant consent for standard resources when agentId is provided,
+  // but only if the agent has no existing consent rules (preserves
+  // user-configured permissions from the dashboard).
   if (agentId) {
-    const resources = ['profile', 'tables/*', 'vectors/*', 'graph', 'memory'];
-    const permission = scopes.includes('write') ? 'write' : 'read';
-    for (const resource of resources) {
-      try {
-        await grantConsent(userId, { agentId, resource, permission });
-      } catch (err) {
-        logger.error('Failed to auto-grant consent', {
-          userId,
-          agentId,
-          resource,
-          permission,
-          error: String(err),
-        });
-        // Continue granting remaining resources even if one fails
+    let existingConsent: unknown[] = [];
+    try {
+      existingConsent = await getAgentConsent(userId, agentId);
+    } catch (err) {
+      // Schema may not exist yet for brand-new users — treat as empty
+      logger.warn('Could not check existing consent (schema may not exist yet)', {
+        userId,
+        agentId,
+        error: String(err),
+      });
+    }
+
+    if (existingConsent.length === 0) {
+      // Only auto-grant for NEW agents (no existing consent rules)
+      const resources = ['profile', 'tables/*', 'vectors/*', 'graph', 'memory'];
+      const permission = scopes.includes('write') ? 'write' : 'read';
+      for (const resource of resources) {
+        try {
+          await grantConsent(userId, { agentId, resource, permission });
+        } catch (err) {
+          logger.error('Failed to auto-grant consent', {
+            userId,
+            agentId,
+            resource,
+            permission,
+            error: String(err),
+          });
+          // Continue granting remaining resources even if one fails
+        }
       }
     }
+    // If agent already has consent rules, respect them as-is.
+    // Creating a new key for an existing agent does NOT escalate
+    // per-resource consent — the user must change permissions
+    // explicitly via the dashboard.
   }
 
   return {

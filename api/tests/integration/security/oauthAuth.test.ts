@@ -20,6 +20,11 @@ import {
   decodeOAuthState,
   hashSessionToken,
 } from '@/utils/crypto';
+import {
+  VALID_OAUTH_SCOPES,
+  validateOAuthScopes,
+  parseOAuthScopesToApiKeyScopes,
+} from '@/mcp/oauth';
 import { db } from '@/db/client';
 import { sql } from 'drizzle-orm';
 import { createTestUser, cleanupTestUser, type TestUser } from '../../helpers/db';
@@ -130,6 +135,14 @@ async function deleteOAuthClient(clientId: string) {
  */
 async function deleteAuthCodes(clientId: string) {
   await db.execute(sql.raw(`DELETE FROM public.oauth_authorization_codes WHERE client_id = '${clientId}'`));
+}
+
+/**
+ * Helper: delete API keys created by token exchange for a given agentId
+ * (needed to stay within free tier maxAgents limit across tests)
+ */
+async function deleteApiKeysForAgent(userId: string, agentId: string) {
+  await db.execute(sql.raw(`DELETE FROM public.api_keys WHERE user_id = '${userId}' AND agent_id = '${agentId}'`));
 }
 
 describe('OAuth & Auth Security Fixes', () => {
@@ -403,6 +416,7 @@ describe('OAuth & Auth Security Fixes', () => {
     });
 
     afterAll(async () => {
+      await deleteApiKeysForAgent(testUser.userId, 'test-hash-app');
       await deleteAuthCodes(oauthClientId);
       await deleteOAuthClient(oauthClientId);
     });
@@ -745,6 +759,7 @@ describe('OAuth & Auth Security Fixes', () => {
     });
 
     afterAll(async () => {
+      await deleteApiKeysForAgent(testUser.userId, 'test-scope-app');
       await deleteAuthCodes(oauthClientId);
       await deleteOAuthClient(oauthClientId);
     });
@@ -780,6 +795,363 @@ describe('OAuth & Auth Security Fixes', () => {
       expect(body.token_type).toBe('Bearer');
       expect(body.scope).toBe('profile:read tables:read');
       expect(body.expires_in).toBeDefined();
+    });
+  });
+
+  // ─── OAuth Scope Validation Helpers ─────────────────────────────────
+
+  describe('OAuth scope validation helpers', () => {
+    test('VALID_OAUTH_SCOPES contains all documented scopes', () => {
+      expect(VALID_OAUTH_SCOPES.has('profile:read')).toBe(true);
+      expect(VALID_OAUTH_SCOPES.has('profile:write')).toBe(true);
+      expect(VALID_OAUTH_SCOPES.has('tables:read')).toBe(true);
+      expect(VALID_OAUTH_SCOPES.has('tables:write')).toBe(true);
+      expect(VALID_OAUTH_SCOPES.has('vectors:read')).toBe(true);
+      expect(VALID_OAUTH_SCOPES.has('vectors:write')).toBe(true);
+      expect(VALID_OAUTH_SCOPES.has('graph:read')).toBe(true);
+      expect(VALID_OAUTH_SCOPES.has('memory:read')).toBe(true);
+      expect(VALID_OAUTH_SCOPES.has('memory:write')).toBe(true);
+      expect(VALID_OAUTH_SCOPES.size).toBe(9);
+    });
+
+    test('validateOAuthScopes: accepts valid scopes', () => {
+      const result = validateOAuthScopes('profile:read tables:write');
+      expect(result.valid).toEqual(['profile:read', 'tables:write']);
+      expect(result.invalid).toEqual([]);
+    });
+
+    test('validateOAuthScopes: rejects unknown scopes', () => {
+      const result = validateOAuthScopes('foo:bar profile:read baz');
+      expect(result.valid).toEqual(['profile:read']);
+      expect(result.invalid).toEqual(['foo:bar', 'baz']);
+    });
+
+    test('validateOAuthScopes: returns empty arrays for null/empty input', () => {
+      expect(validateOAuthScopes(null)).toEqual({ valid: [], invalid: [] });
+      expect(validateOAuthScopes('')).toEqual({ valid: [], invalid: [] });
+      expect(validateOAuthScopes('  ')).toEqual({ valid: [], invalid: [] });
+    });
+
+    test('parseOAuthScopesToApiKeyScopes: read-only scopes → [read]', () => {
+      expect(parseOAuthScopesToApiKeyScopes('profile:read')).toEqual(['read']);
+      expect(parseOAuthScopesToApiKeyScopes('profile:read tables:read graph:read')).toEqual(['read']);
+    });
+
+    test('parseOAuthScopesToApiKeyScopes: any write scope → [read, write]', () => {
+      expect(parseOAuthScopesToApiKeyScopes('profile:read tables:write')).toEqual(['read', 'write']);
+      expect(parseOAuthScopesToApiKeyScopes('memory:write')).toEqual(['read', 'write']);
+    });
+
+    test('parseOAuthScopesToApiKeyScopes: empty/null → [read, write] (backward compat)', () => {
+      expect(parseOAuthScopesToApiKeyScopes(null)).toEqual(['read', 'write']);
+      expect(parseOAuthScopesToApiKeyScopes('')).toEqual(['read', 'write']);
+    });
+  });
+
+  // ─── Token Exchange Respects Scope ──────────────────────────────────
+
+  describe('Token exchange respects OAuth scopes', () => {
+    let oauthClientId: string;
+
+    beforeAll(async () => {
+      oauthClientId = crypto.randomBytes(16).toString('hex');
+      await insertOAuthClient(oauthClientId, 'Test Scope Respect', ['https://localhost:3000/callback']);
+    });
+
+    afterAll(async () => {
+      await deleteApiKeysForAgent(testUser.userId, 'test-scope-respect');
+      await deleteAuthCodes(oauthClientId);
+      await deleteOAuthClient(oauthClientId);
+    });
+
+    /**
+     * Helper: create auth code and exchange for token
+     */
+    async function exchangeCodeForToken(scope: string) {
+      const rawCode = crypto.randomBytes(64).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+      const codeVerifier = crypto.randomBytes(32).toString('hex');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+      await db.execute(sql.raw(`
+        INSERT INTO public.oauth_authorization_codes (code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, state, expires_at)
+        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback', '${scope}', '${codeChallenge}', 'S256', '', '${new Date(Date.now() + 60 * 1000).toISOString()}')
+      `));
+
+      const formBody = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: rawCode,
+        code_verifier: codeVerifier,
+        redirect_uri: 'https://localhost:3000/callback',
+        client_id: oauthClientId,
+      });
+
+      return app.request('/v1/auth/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formBody.toString(),
+      });
+    }
+
+    test('read-only scope creates read-only API key', async () => {
+      const response = await exchangeCodeForToken('profile:read');
+      expect(response.status).toBe(200);
+      const body = await response.json() as any;
+      expect(body.access_token).toBeDefined();
+
+      // Verify the API key was created with read-only scopes
+      const keyHash = crypto.createHash('sha256').update(body.access_token).digest('hex');
+      const rows = await db.execute(sql.raw(`
+        SELECT scopes FROM public.api_keys WHERE key_hash = '${keyHash}'
+      `)) as unknown as any[];
+      expect(rows.length).toBe(1);
+      expect(rows[0].scopes).toEqual(['read']);
+    });
+
+    test('write scope creates read+write API key', async () => {
+      const response = await exchangeCodeForToken('profile:read tables:write');
+      expect(response.status).toBe(200);
+      const body = await response.json() as any;
+      expect(body.access_token).toBeDefined();
+
+      const keyHash = crypto.createHash('sha256').update(body.access_token).digest('hex');
+      const rows = await db.execute(sql.raw(`
+        SELECT scopes FROM public.api_keys WHERE key_hash = '${keyHash}'
+      `)) as unknown as any[];
+      expect(rows.length).toBe(1);
+      expect(rows[0].scopes).toEqual(['read', 'write']);
+    });
+
+    test('empty scope falls back to read+write (backward compat)', async () => {
+      const response = await exchangeCodeForToken('');
+      expect(response.status).toBe(200);
+      const body = await response.json() as any;
+      expect(body.access_token).toBeDefined();
+
+      const keyHash = crypto.createHash('sha256').update(body.access_token).digest('hex');
+      const rows = await db.execute(sql.raw(`
+        SELECT scopes FROM public.api_keys WHERE key_hash = '${keyHash}'
+      `)) as unknown as any[];
+      expect(rows.length).toBe(1);
+      expect(rows[0].scopes).toEqual(['read', 'write']);
+    });
+
+    test('unknown scopes are dropped, valid scopes respected', async () => {
+      const response = await exchangeCodeForToken('foo:bar profile:read');
+      expect(response.status).toBe(200);
+      const body = await response.json() as any;
+      expect(body.access_token).toBeDefined();
+
+      // Only profile:read is valid → read-only key
+      const keyHash = crypto.createHash('sha256').update(body.access_token).digest('hex');
+      const rows = await db.execute(sql.raw(`
+        SELECT scopes FROM public.api_keys WHERE key_hash = '${keyHash}'
+      `)) as unknown as any[];
+      expect(rows.length).toBe(1);
+      expect(rows[0].scopes).toEqual(['read']);
+    });
+  });
+
+  // ─── Client Registration Scope Handling ─────────────────────────────
+
+  describe('Client registration scope handling', () => {
+    test('registration without scope omits scope field (not null)', async () => {
+      const response = await app.request('/v1/auth/oauth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_name: 'No Scope Client',
+          redirect_uris: ['https://localhost:3000/callback'],
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const body = await response.json() as any;
+      expect(body.client_id).toBeDefined();
+      // scope should be absent from response, not null
+      expect(body).not.toHaveProperty('scope');
+
+      // Cleanup
+      await deleteOAuthClient(body.client_id);
+    });
+
+    test('registration with scope includes it in response', async () => {
+      const response = await app.request('/v1/auth/oauth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_name: 'Scoped Client',
+          redirect_uris: ['https://localhost:3000/callback'],
+          scope: 'profile:read memory:read',
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const body = await response.json() as any;
+      expect(body.scope).toBe('profile:read memory:read');
+
+      // Cleanup
+      await deleteOAuthClient(body.client_id);
+    });
+  });
+
+  // ─── Agent ID Mapping Convention ────────────────────────────────────
+
+  describe('OAuth agent ID mapping', () => {
+    test('ChatGPT client name maps to "chatgpt" agentId', async () => {
+      const oauthClientId = crypto.randomBytes(16).toString('hex');
+      await insertOAuthClient(oauthClientId, 'ChatGPT', ['https://localhost:3000/callback']);
+
+      const rawCode = crypto.randomBytes(64).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+      const codeVerifier = crypto.randomBytes(32).toString('hex');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+      await db.execute(sql.raw(`
+        INSERT INTO public.oauth_authorization_codes (code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, state, expires_at)
+        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback', 'profile:read', '${codeChallenge}', 'S256', '', '${new Date(Date.now() + 60 * 1000).toISOString()}')
+      `));
+
+      const formBody = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: rawCode,
+        code_verifier: codeVerifier,
+        redirect_uri: 'https://localhost:3000/callback',
+        client_id: oauthClientId,
+      });
+
+      const response = await app.request('/v1/auth/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formBody.toString(),
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as any;
+
+      // Verify the API key has agentId = 'chatgpt'
+      const keyHash = crypto.createHash('sha256').update(body.access_token).digest('hex');
+      const rows = await db.execute(sql.raw(`
+        SELECT agent_id FROM public.api_keys WHERE key_hash = '${keyHash}'
+      `)) as unknown as any[];
+      expect(rows.length).toBe(1);
+      expect(rows[0].agent_id).toBe('chatgpt');
+
+      // Cleanup
+      await deleteApiKeysForAgent(testUser.userId, 'chatgpt');
+      await deleteAuthCodes(oauthClientId);
+      await deleteOAuthClient(oauthClientId);
+    });
+
+    test('multi-word client name maps correctly', async () => {
+      const oauthClientId = crypto.randomBytes(16).toString('hex');
+      await insertOAuthClient(oauthClientId, 'My Custom Agent v2', ['https://localhost:3000/callback']);
+
+      const rawCode = crypto.randomBytes(64).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+      const codeVerifier = crypto.randomBytes(32).toString('hex');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+      await db.execute(sql.raw(`
+        INSERT INTO public.oauth_authorization_codes (code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, state, expires_at)
+        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback', 'profile:read', '${codeChallenge}', 'S256', '', '${new Date(Date.now() + 60 * 1000).toISOString()}')
+      `));
+
+      const formBody = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: rawCode,
+        code_verifier: codeVerifier,
+        redirect_uri: 'https://localhost:3000/callback',
+        client_id: oauthClientId,
+      });
+
+      const response = await app.request('/v1/auth/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formBody.toString(),
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as any;
+
+      const keyHash = crypto.createHash('sha256').update(body.access_token).digest('hex');
+      const rows = await db.execute(sql.raw(`
+        SELECT agent_id FROM public.api_keys WHERE key_hash = '${keyHash}'
+      `)) as unknown as any[];
+      expect(rows.length).toBe(1);
+      expect(rows[0].agent_id).toBe('my-custom-agent-v2');
+
+      // Cleanup
+      await deleteApiKeysForAgent(testUser.userId, 'my-custom-agent-v2');
+      await deleteAuthCodes(oauthClientId);
+      await deleteOAuthClient(oauthClientId);
+    });
+  });
+
+  // ─── Consent Preservation on Re-auth ────────────────────────────────
+
+  describe('Consent rules preserved on OAuth re-auth', () => {
+    test('existing dashboard consent is NOT overwritten by OAuth token exchange', async () => {
+      const oauthClientId = crypto.randomBytes(16).toString('hex');
+      const agentId = 'consent-test-agent';
+      await insertOAuthClient(oauthClientId, 'Consent Test Agent', ['https://localhost:3000/callback']);
+
+      // Pre-create consent rules (simulating dashboard-configured read-only agent)
+      await db.execute(sql.raw(`
+        INSERT INTO ${testUser.schemaName}.consent_rules (agent_id, resource, permission)
+        VALUES ('${agentId}', 'profile', 'read')
+        ON CONFLICT (agent_id, resource) DO UPDATE SET permission = 'read', revoked_at = NULL
+      `));
+
+      // Now do OAuth token exchange for the same agentId
+      const rawCode = crypto.randomBytes(64).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+      const codeVerifier = crypto.randomBytes(32).toString('hex');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+      await db.execute(sql.raw(`
+        INSERT INTO public.oauth_authorization_codes (code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, state, expires_at)
+        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback', 'memory:write', '${codeChallenge}', 'S256', '', '${new Date(Date.now() + 60 * 1000).toISOString()}')
+      `));
+
+      const formBody = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: rawCode,
+        code_verifier: codeVerifier,
+        redirect_uri: 'https://localhost:3000/callback',
+        client_id: oauthClientId,
+      });
+
+      const response = await app.request('/v1/auth/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formBody.toString(),
+      });
+
+      expect(response.status).toBe(200);
+
+      // Verify the original read-only consent was NOT overwritten to write
+      const consentRows = await db.execute(sql.raw(`
+        SELECT permission FROM ${testUser.schemaName}.consent_rules
+        WHERE agent_id = '${agentId}' AND resource = 'profile' AND revoked_at IS NULL
+      `)) as unknown as any[];
+      expect(consentRows.length).toBe(1);
+      expect(consentRows[0].permission).toBe('read');
+
+      // Verify no new consent rules were auto-granted (only the 1 we inserted)
+      const allConsent = await db.execute(sql.raw(`
+        SELECT COUNT(*)::int AS count FROM ${testUser.schemaName}.consent_rules
+        WHERE agent_id = '${agentId}' AND revoked_at IS NULL
+      `)) as unknown as any[];
+      expect(allConsent[0].count).toBe(1);
+
+      // Cleanup
+      await deleteApiKeysForAgent(testUser.userId, agentId);
+      await db.execute(sql.raw(`
+        DELETE FROM ${testUser.schemaName}.consent_rules WHERE agent_id = '${agentId}'
+      `));
+      await deleteAuthCodes(oauthClientId);
+      await deleteOAuthClient(oauthClientId);
     });
   });
 });

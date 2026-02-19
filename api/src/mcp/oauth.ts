@@ -32,6 +32,65 @@ import {
 import { createApiKeyForUser } from '@/services/auth.service';
 import { logger } from '@/utils/logger';
 
+// ─── OAuth Scope Validation ─────────────────────────────────────────
+
+/**
+ * Allowlist of valid OAuth scopes, derived from scopes_supported in
+ * protectedResourceMetadata and oauthDiscovery.
+ */
+export const VALID_OAUTH_SCOPES = new Set([
+  'profile:read',
+  'profile:write',
+  'tables:read',
+  'tables:write',
+  'vectors:read',
+  'vectors:write',
+  'graph:read',
+  'memory:read',
+  'memory:write',
+]);
+
+/**
+ * Validate an OAuth scope string against the allowlist.
+ * Splits on whitespace and categorizes each token.
+ */
+export function validateOAuthScopes(scopeString: string | null | undefined): {
+  valid: string[];
+  invalid: string[];
+} {
+  if (!scopeString || !scopeString.trim()) {
+    return { valid: [], invalid: [] };
+  }
+  const tokens = scopeString.trim().split(/\s+/);
+  const valid: string[] = [];
+  const invalid: string[] = [];
+  for (const token of tokens) {
+    if (VALID_OAUTH_SCOPES.has(token)) {
+      valid.push(token);
+    } else {
+      invalid.push(token);
+    }
+  }
+  return { valid, invalid };
+}
+
+/**
+ * Convert validated OAuth scope tokens to API key scopes (['read'] or ['read','write']).
+ *
+ * - If any scope ends with `:write` → ['read', 'write']
+ * - If all scopes are `:read` → ['read']
+ * - If empty/missing → ['read', 'write'] (backward-compat fallback)
+ */
+export function parseOAuthScopesToApiKeyScopes(scopeString: string | null | undefined): string[] {
+  if (!scopeString || !scopeString.trim()) {
+    logger.warn('OAuth scope empty — falling back to read+write for backward compatibility');
+    return ['read', 'write'];
+  }
+  const tokens = scopeString.trim().split(/\s+/);
+  const hasWrite = tokens.some((t) => t.endsWith(':write'));
+  return hasWrite ? ['read', 'write'] : ['read'];
+}
+
 // ─── APP_ENV-scoped resource validation (RFC 8707) ──────────────────
 
 const ALLOWED_RESOURCES: Record<string, Set<string>> = {
@@ -60,7 +119,10 @@ export function validateResource(resource: string | undefined): string | null {
   if (!resource) return null; // resource param is optional
   const env = getAppEnv();
   const allowed = ALLOWED_RESOURCES[env]!;
-  if (!allowed.has(resource)) {
+  // Normalize trailing slash — Claude sends "https://api.epitome.fyi/"
+  // but our allowlist has "https://api.epitome.fyi"
+  const normalized = resource.replace(/\/+$/, '');
+  if (!allowed.has(normalized)) {
     return `Invalid resource parameter for environment '${env}'`;
   }
   return null;
@@ -200,18 +262,17 @@ export async function oauthRegister(c: Context) {
     logoUri,
   });
 
-  return c.json(
-    {
-      client_id: clientId,
-      client_name: clientName,
-      redirect_uris: redirectUris,
-      grant_types: ['authorization_code'],
-      response_types: ['code'],
-      token_endpoint_auth_method: 'none',
-      scope,
-    },
-    201
-  );
+  const response: Record<string, unknown> = {
+    client_id: clientId,
+    client_name: clientName,
+    redirect_uris: redirectUris,
+    grant_types: ['authorization_code'],
+    response_types: ['code'],
+    token_endpoint_auth_method: 'none',
+  };
+  if (scope) response.scope = scope;
+
+  return c.json(response, 201);
 }
 
 // ─── Authorization Endpoint ─────────────────────────────────────────
@@ -498,7 +559,8 @@ export async function oauthToken(c: Context) {
   }
 
   // RFC 8707: Validate resource matches what was stored with the auth code
-  if (resource && authCode.resource && resource !== authCode.resource) {
+  // Normalize trailing slashes for comparison
+  if (resource && authCode.resource && resource.replace(/\/+$/, '') !== authCode.resource.replace(/\/+$/, '')) {
     return c.json({ error: 'invalid_grant', error_description: 'resource does not match the authorization request' }, 400);
   }
 
@@ -528,11 +590,20 @@ export async function oauthToken(c: Context) {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
 
+    // Validate scopes from auth code
+    const { valid, invalid } = validateOAuthScopes(authCode.scope);
+    if (invalid.length > 0) {
+      logger.warn('OAuth token exchange: ignoring unknown scopes', { invalid });
+    }
+    const apiKeyScopes = parseOAuthScopesToApiKeyScopes(
+      valid.length > 0 ? valid.join(' ') : authCode.scope
+    );
+
     const apiKey = await createApiKeyForUser(
       authCode.userId,
       `MCP OAuth (${client?.clientName || authCode.clientId})`,
       agentId,
-      ['read', 'write'],
+      apiKeyScopes,
       365 // 1 year expiry
     );
 
@@ -550,31 +621,37 @@ export async function oauthToken(c: Context) {
 
 // ─── HTML Page Renderers ────────────────────────────────────────────
 
+const FONT_LINKS = `
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+`;
+
 const PAGE_STYLES = `
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e5e5e5; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .card { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 2rem; max-width: 420px; width: 100%; }
-    .logo { font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 1.5rem; text-align: center; }
-    .logo span { color: #818cf8; }
-    h2 { font-size: 1.1rem; color: #d4d4d4; margin-bottom: 1rem; text-align: center; }
-    .info { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
-    .info .label { color: #a3a3a3; font-size: 0.8rem; margin-bottom: 0.25rem; }
-    .info .value { color: #fff; word-break: break-all; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a1a; color: #fafafa; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #1f1f1f; border: 1px solid #333338; border-radius: 14px; padding: 2.5rem 2rem; max-width: 420px; width: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+    .logo { font-family: 'Instrument Serif', serif; font-size: 1.75rem; font-weight: 400; letter-spacing: -0.02em; color: #fff; margin-bottom: 1.5rem; text-align: center; }
+    .logo span { color: #3b82f6; }
+    h2 { font-family: 'Inter', sans-serif; font-size: 1.125rem; font-weight: 600; color: #fafafa; margin-bottom: 1rem; text-align: center; }
+    .info { background: #2a2a2a; border: 1px solid #333338; border-radius: 10px; padding: 1rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+    .info .label { color: #808080; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; margin-bottom: 0.25rem; }
+    .info .value { color: #fafafa; font-weight: 500; word-break: break-all; }
     .info + .info { margin-top: 0.75rem; }
     .scope-list { margin: 0.5rem 0; padding-left: 1.25rem; }
-    .scope-list li { color: #d4d4d4; margin-bottom: 0.25rem; }
+    .scope-list li { color: #fafafa; font-size: 0.875rem; margin-bottom: 0.25rem; }
     .btn-row { display: flex; gap: 0.75rem; }
-    .btn { flex: 1; padding: 0.75rem 1rem; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none; display: inline-block; }
-    .btn-primary { background: #818cf8; color: #fff; }
-    .btn-primary:hover { background: #6366f1; }
-    .btn-secondary { background: #262626; color: #d4d4d4; border: 1px solid #404040; }
-    .btn-secondary:hover { background: #333; }
-    .btn-google { display: flex; align-items: center; justify-content: center; gap: 0.5rem; background: #fff; color: #333; border: 1px solid #ddd; border-radius: 8px; padding: 0.75rem; font-size: 0.95rem; font-weight: 500; text-decoration: none; width: 100%; }
+    .btn { flex: 1; padding: 0.75rem 1rem; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 500; font-family: 'Inter', sans-serif; cursor: pointer; text-align: center; text-decoration: none; display: inline-block; transition: all 0.2s ease; }
+    .btn-primary { background: #3b82f6; color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-secondary { background: #2a2a2a; color: #fafafa; border: 1px solid #333338; }
+    .btn-secondary:hover { background: #333338; }
+    .btn-google { display: flex; align-items: center; justify-content: center; gap: 0.5rem; background: #fff; color: #333; border: 1px solid #ddd; border-radius: 8px; padding: 0.75rem; font-size: 0.95rem; font-weight: 500; font-family: 'Inter', sans-serif; text-decoration: none; width: 100%; transition: all 0.2s ease; }
     .btn-google:hover { background: #f5f5f5; }
-    .error-text { color: #f87171; text-align: center; }
-    .divider { border-top: 1px solid #333; margin: 1.5rem 0; }
-    .footer { text-align: center; font-size: 0.8rem; color: #737373; margin-top: 1rem; }
+    .error-text { color: #ef4444; text-align: center; }
+    .divider { border-top: 1px solid #333338; margin: 1.5rem 0; }
+    .footer { text-align: center; font-size: 0.8rem; color: #808080; border-top: 1px solid #333338; padding-top: 1rem; margin-top: 1.5rem; }
   </style>
 `;
 
@@ -589,13 +666,14 @@ function renderLoginPage(authorizeUrl: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign in — Epitome</title>
+  ${FONT_LINKS}
   ${PAGE_STYLES}
 </head>
 <body>
   <div class="card">
     <div class="logo">ep<span>i</span>tome</div>
     <h2>Sign in to connect your AI</h2>
-    <p style="text-align:center; color:#a3a3a3; font-size:0.9rem; margin-bottom:1.5rem;">
+    <p style="text-align:center; color:#808080; font-size:0.9rem; margin-bottom:1.5rem;">
       An AI agent wants to access your Epitome memory. Sign in to continue.
     </p>
     <a href="${escapeHtml(loginUrl)}" class="btn-google">
@@ -629,6 +707,7 @@ function renderConsentPage(params: {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Authorize — Epitome</title>
+  ${FONT_LINKS}
   ${PAGE_STYLES}
 </head>
 <body>
@@ -678,6 +757,7 @@ function renderErrorPage(message: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Error — Epitome</title>
+  ${FONT_LINKS}
   ${PAGE_STYLES}
 </head>
 <body>
