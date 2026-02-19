@@ -17,6 +17,15 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/v1';
 
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 interface ApiOptions extends RequestInit {
   params?: Record<string, string | number | boolean>;
 }
@@ -45,7 +54,7 @@ async function apiCall<T>(endpoint: string, options: ApiOptions = {}): Promise<T
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(error.message || `API error: ${res.status}`);
+    throw new ApiError(error.message || `API error: ${res.status}`, res.status);
   }
 
   return res.json();

@@ -22,6 +22,8 @@ export function useSession() {
     queryKey: ['auth', 'session'],
     queryFn: authApi.session,
     retry: false,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
   });
 }
 

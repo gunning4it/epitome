@@ -1,6 +1,7 @@
-import { lazy } from 'react';
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useSession } from '@/hooks/useApi';
+import { ApiError } from '@/lib/api-client';
 
 // Layout
 import DashboardLayout from '@/components/DashboardLayout';
@@ -52,13 +53,16 @@ function LoadingSpinner() {
 }
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { isLoading, error } = useSession();
+  const { data: session, isLoading, error } = useSession();
 
-  if (isLoading) {
+  // Only show spinner on initial load (no cached data yet)
+  if (isLoading && !session) {
     return <LoadingSpinner />;
   }
 
-  if (error) {
+  // Redirect on auth-specific errors (401/403), even if stale data exists
+  const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403);
+  if (isAuthError || (error && !session)) {
     return <Navigate to="/onboarding" replace />;
   }
 
@@ -73,7 +77,7 @@ export default function AppRoutes() {
       <Route path="/onboarding" element={<Onboarding />} />
 
       {/* Docs routes */}
-      <Route path="/docs" element={<DocsLayout />}>
+      <Route path="/docs" element={<Suspense fallback={<LoadingSpinner />}><DocsLayout /></Suspense>}>
         <Route index element={<DocsIndex />} />
         <Route path="quick-start" element={<QuickStart />} />
         <Route path="mcp-tools" element={<McpTools />} />
@@ -87,7 +91,7 @@ export default function AppRoutes() {
       </Route>
 
       {/* Legal pages */}
-      <Route path="/legal" element={<LegalLayout />}>
+      <Route path="/legal" element={<Suspense fallback={<LoadingSpinner />}><LegalLayout /></Suspense>}>
         <Route index element={<Navigate to="/legal/privacy" replace />} />
         <Route path="privacy" element={<PrivacyPolicy />} />
         <Route path="terms" element={<TermsOfService />} />

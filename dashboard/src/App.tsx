@@ -1,4 +1,3 @@
-import { Suspense } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppRoutes from '@/AppRoutes';
@@ -13,21 +12,11 @@ const queryClient = new QueryClient({
   },
 });
 
-function LoadingSpinner() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="size-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-    </div>
-  );
-}
-
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Suspense fallback={<LoadingSpinner />}>
-          <AppRoutes />
-        </Suspense>
+        <AppRoutes />
       </BrowserRouter>
     </QueryClientProvider>
   );
