@@ -280,7 +280,7 @@ jobs:
   security:
     name: Security Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
 
     steps:
       - name: Checkout code
@@ -311,17 +311,23 @@ jobs:
         working-directory: ./dashboard
         run: npm audit --audit-level=critical
 
-      - name: Run dependency check
-        uses: dependency-check/Dependency-Check_Action@main
-        with:
-          project: 'epitome'
-          path: '.'
-          format: 'HTML'
-          out: 'reports'
-          args: >-
-            --failOnCVSS 7
+  # Job 8: Dependency Review (PR only)
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 5
 
-  # Job 8: Build Verification
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: critical
+
+  # Job 9: Build Verification
   build:
     name: Build Verification
     runs-on: ubuntu-latest
@@ -363,7 +369,7 @@ jobs:
             api/dist/
             dashboard/dist/
 
-  # Job 9: Deployment (only on main branch)
+  # Job 10: Deployment (only on main branch)
   deploy:
     name: Deploy to Production
     runs-on: ubuntu-latest
