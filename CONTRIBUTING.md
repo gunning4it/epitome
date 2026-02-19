@@ -35,7 +35,7 @@ psql --version   # Should be 17.x or higher
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/epitome.git
+git clone https://github.com/gunning4it/epitome.git
 cd epitome
 
 # Install API dependencies
@@ -50,7 +50,7 @@ npm install
 cp .env.example .env
 
 # Start development environment
-docker-compose up -d
+docker compose up -d
 ```
 
 ---
@@ -390,10 +390,10 @@ npm install
 **Solution:**
 ```bash
 # Check Docker
-docker-compose ps
+docker compose ps
 
 # Restart database
-docker-compose restart postgres
+docker compose restart postgres
 
 # Check .env file has correct DB credentials
 ```
