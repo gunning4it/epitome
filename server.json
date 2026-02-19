@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.gunning4it/epitome-mcp",
+  "title": "Epitome",
+  "description": "Personal AI memory — gives every AI agent shared, persistent memory of you",
+  "websiteUrl": "https://epitome.fyi",
+  "repository": {
+    "url": "https://github.com/gunning4it/epitome",
+    "source": "github",
+    "id": "gunning4it/epitome"
+  },
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://epitome.fyi/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Enter Bearer <your_api_key> — get your key at https://epitome.fyi/dashboard/settings",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
