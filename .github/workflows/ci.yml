@@ -290,9 +290,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            api/package-lock.json
+            dashboard/package-lock.json
 
-      - name: Run npm audit
+      - name: Install API dependencies
         working-directory: ./api
+        run: npm ci
+
+      - name: Install Dashboard dependencies
+        working-directory: ./dashboard
+        run: npm ci
+
+      - name: Run npm audit (API)
+        working-directory: ./api
+        run: npm audit --audit-level=critical
+
+      - name: Run npm audit (Dashboard)
+        working-directory: ./dashboard
         run: npm audit --audit-level=critical
 
       - name: Run dependency check
@@ -301,6 +317,9 @@ jobs:
           project: 'epitome'
           path: '.'
           format: 'HTML'
+          out: 'reports'
+          args: >-
+            --failOnCVSS 7
 
   # Job 8: Build Verification
   build:
