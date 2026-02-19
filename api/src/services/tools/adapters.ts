@@ -7,8 +7,9 @@ export interface McpToolResponse {
 }
 
 export interface ChatGptToolResponse {
+  [key: string]: unknown;
   content: Array<{ type: 'text'; text: string }>;
-  structuredContent?: unknown;
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }
 
@@ -45,6 +46,6 @@ export function chatgptAdapter(result: ToolResult): ChatGptToolResponse {
   }
   return {
     content: [{ type: 'text', text: result.message }],
-    structuredContent: result.data,
+    structuredContent: result.data as Record<string, unknown>,
   };
 }

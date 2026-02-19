@@ -25,6 +25,7 @@ import consentRoutes from '@/routes/consent';
 import webhookRoutes from '@/routes/webhooks';
 import billingRoutes from '@/routes/billing';
 import { createMcpRoutes } from '@/mcp/handler';
+import { createChatGptMcpRoutes } from '@/mcp-apps/handler';
 import {
   oauthDiscovery,
   protectedResourceMetadata,
@@ -79,6 +80,11 @@ app.route('/v1', activityRoutes); // Activity routes include /v1/activity and /v
 
 // Mount MCP server
 app.route('/mcp', createMcpRoutes());
+
+// Mount ChatGPT Apps MCP endpoint (feature-flagged)
+if (process.env.CHATGPT_MCP_ENABLED === 'true') {
+  app.route('/chatgpt-mcp', createChatGptMcpRoutes());
+}
 
 // OAuth 2.0 discovery + MCP OAuth flow
 app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata);
