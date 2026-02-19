@@ -99,7 +99,8 @@ Epitome exposes **9 MCP tools** — profile read/write, memory search, table CRU
 
 | Dashboard Overview | Knowledge Graph | Memory Search |
 |:---:|:---:|:---:|
-| ![Dashboard showing profile and recent activity](https://placehold.co/600x400/1a1a2e/ffffff?text=Dashboard+Overview) | ![D3.js knowledge graph visualization](https://placehold.co/600x400/1a1a2e/ffffff?text=Knowledge+Graph) | ![Semantic memory search results](https://placehold.co/600x400/1a1a2e/ffffff?text=Memory+Search) |
+| <img width="1445" height="858" alt="Screenshot 2026-02-18 at 10 52 30 PM" src="https://github.com/user-attachments/assets/eeb5b814-f61b-4be7-98a2-f8fa820ad2ca" />
+| ![D3.js knowledge graph visualization](https://placehold.co/600x400/1a1a2e/ffffff?text=Knowledge+Graph) | ![Semantic memory search results](https://placehold.co/600x400/1a1a2e/ffffff?text=Memory+Search) |
 | Profile, tables, and activity at a glance | People, places, and concepts — connected | Semantic search across all your memories |
 
 ---
