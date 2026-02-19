@@ -266,6 +266,16 @@ export function useRevokeAgent() {
   });
 }
 
+export function useDeleteAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (agentId: string) => agentsApi.delete(agentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+    },
+  });
+}
+
 // Billing hooks
 export function useBillingUsage() {
   return useQuery({

@@ -162,4 +162,5 @@ export interface AgentWithConsent {
   permissions: Array<{ resource: string; permission: 'read' | 'write' }>;
   last_used: string | null;
   created_at: string;
+  status: 'active' | 'revoked';
 }

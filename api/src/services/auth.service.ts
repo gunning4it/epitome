@@ -10,7 +10,7 @@
 
 import { db, sql as pgSql } from '@/db/client';
 import { eq, and, isNull, gt, lt } from 'drizzle-orm';
-import { users, apiKeys, sessions, oauthConnections } from '@/db/schema';
+import { users, apiKeys, sessions, oauthConnections, agentRegistry } from '@/db/schema';
 import { generateApiKey, generateSessionToken, hashSessionToken, encryptIfAvailable } from '@/utils/crypto';
 import { OAuthProvider } from '@/validators/auth';
 import { logger } from '@/utils/logger';
@@ -395,6 +395,45 @@ export async function revokeApiKey(keyId: string, userId: string): Promise<void>
   if (result.length === 0) {
     throw new Error('NOT_FOUND: API key not found or not owned by user');
   }
+}
+
+/**
+ * Revoke all API keys for an agent
+ *
+ * Sets revoked_at on all active keys for the agent
+ *
+ * @param userId - User ID (ownership check)
+ * @param agentId - Agent ID
+ */
+export async function revokeApiKeysForAgent(userId: string, agentId: string): Promise<void> {
+  await db
+    .update(apiKeys)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(apiKeys.userId, userId), eq(apiKeys.agentId, agentId), isNull(apiKeys.revokedAt)));
+}
+
+/**
+ * Hard-delete all API keys for an agent
+ *
+ * @param userId - User ID (ownership check)
+ * @param agentId - Agent ID
+ */
+export async function deleteApiKeysForAgent(userId: string, agentId: string): Promise<void> {
+  await db
+    .delete(apiKeys)
+    .where(and(eq(apiKeys.userId, userId), eq(apiKeys.agentId, agentId)));
+}
+
+/**
+ * Hard-delete agent registry entry
+ *
+ * @param userId - User ID (ownership check)
+ * @param agentId - Agent ID
+ */
+export async function deleteAgentRegistryEntry(userId: string, agentId: string): Promise<void> {
+  await db
+    .delete(agentRegistry)
+    .where(and(eq(agentRegistry.userId, userId), eq(agentRegistry.agentId, agentId)));
 }
 
 /**

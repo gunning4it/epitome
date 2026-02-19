@@ -15,12 +15,13 @@ import type { HonoEnv } from '@/types/hono';
 import { requireAuth, requireUser } from '@/middleware/auth';
 import { db } from '@/db/client';
 import { apiKeys } from '@/db/schema';
-import { eq, and, isNull, isNotNull } from 'drizzle-orm';
+import { eq, and, isNotNull } from 'drizzle-orm';
 import {
   getAgentConsent,
   grantConsent,
   revokeConsent,
   revokeAllAgentConsent,
+  deleteAllAgentData,
 } from '@/services/consent.service';
 import { logger } from '@/utils/logger';
 
@@ -45,32 +46,40 @@ const consent = new Hono<HonoEnv>();
 consent.get('/', requireAuth, requireUser, async (c) => {
   const userId = c.get('userId') as string;
 
-  // Get all non-revoked API keys with agentIds for this user
+  // Get ALL API keys with agentIds for this user (active + revoked)
   const keys = await db
     .select()
     .from(apiKeys)
     .where(
       and(
         eq(apiKeys.userId, userId),
-        isNull(apiKeys.revokedAt),
         isNotNull(apiKeys.agentId)
       )
     )
     .orderBy(apiKeys.createdAt);
 
-  // Deduplicate by agentId, keeping the most recently used
-  const agentMap = new Map<string, typeof keys[0]>();
+  // Group by agentId — track best key for metadata and whether all keys are revoked
+  const agentMap = new Map<string, { key: typeof keys[0]; allRevoked: boolean }>();
   for (const key of keys) {
     if (!key.agentId) continue;
     const existing = agentMap.get(key.agentId);
-    if (!existing || (key.lastUsedAt && (!existing.lastUsedAt || key.lastUsedAt > existing.lastUsedAt))) {
-      agentMap.set(key.agentId, key);
+    if (!existing) {
+      agentMap.set(key.agentId, { key, allRevoked: !!key.revokedAt });
+    } else {
+      // If any key is not revoked, agent is active
+      if (!key.revokedAt) {
+        existing.allRevoked = false;
+      }
+      // Keep the most recently used key for metadata
+      if (key.lastUsedAt && (!existing.key.lastUsedAt || key.lastUsedAt > existing.key.lastUsedAt)) {
+        existing.key = key;
+      }
     }
   }
 
-  // For each agent, get their consent rules
+  // For each agent, get their consent rules and determine status
   const agents = await Promise.all(
-    Array.from(agentMap.entries()).map(async ([agentId, key]) => {
+    Array.from(agentMap.entries()).map(async ([agentId, { key, allRevoked }]) => {
       const rules = await getAgentConsent(userId, agentId);
       return {
         agent_id: agentId,
@@ -81,6 +90,7 @@ consent.get('/', requireAuth, requireUser, async (c) => {
         })),
         last_used: key.lastUsedAt?.toISOString() || null,
         created_at: key.createdAt.toISOString(),
+        status: allRevoked ? 'revoked' as const : 'active' as const,
       };
     })
   );
@@ -153,6 +163,51 @@ consent.patch('/:agentId', requireAuth, requireUser, async (c) => {
       500
     );
   }
+});
+
+/**
+ * DELETE /v1/consent/:agentId/delete
+ *
+ * Permanently delete all data for a revoked agent.
+ * Agent must have all API keys revoked first.
+ */
+consent.delete('/:agentId/delete', requireAuth, requireUser, async (c) => {
+  const userId = c.get('userId') as string;
+  const rawAgentId = c.req.param('agentId');
+
+  const agentIdResult = agentIdParamSchema.safeParse(rawAgentId);
+  if (!agentIdResult.success) {
+    return c.json(
+      { error: { code: 'BAD_REQUEST', message: 'Invalid agentId parameter', details: agentIdResult.error.issues } },
+      400
+    );
+  }
+  const agentId = agentIdResult.data;
+
+  // Verify agent exists and all keys are revoked
+  const agentKeys = await db
+    .select()
+    .from(apiKeys)
+    .where(and(eq(apiKeys.userId, userId), eq(apiKeys.agentId, agentId)));
+
+  if (agentKeys.length === 0) {
+    return c.json(
+      { error: { code: 'NOT_FOUND', message: 'Agent not found' } },
+      404
+    );
+  }
+
+  const hasActiveKeys = agentKeys.some((k) => !k.revokedAt);
+  if (hasActiveKeys) {
+    return c.json(
+      { error: { code: 'BAD_REQUEST', message: 'Agent must be revoked before deletion. Revoke access first.' } },
+      400
+    );
+  }
+
+  await deleteAllAgentData(userId, agentId);
+
+  return c.json({ success: true });
 });
 
 /**

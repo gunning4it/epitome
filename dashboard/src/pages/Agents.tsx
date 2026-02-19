@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { useAgents, useUpdateConsent, useRevokeAgent, useCreateApiKey } from '@/hooks/useApi';
+import { useAgents, useUpdateConsent, useRevokeAgent, useDeleteAgent, useCreateApiKey } from '@/hooks/useApi';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatDateTime } from '@/lib/utils';
 import type { AgentWithConsent } from '@/lib/types';
-import { Shield, Check, Info, ChevronDown, AlertTriangle, Loader2 } from 'lucide-react';
+import { Shield, Check, Info, ChevronDown, AlertTriangle, Loader2, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState } from '@/components/EmptyState';
 import { CodeBlock } from '@/components/CodeBlock';
@@ -293,10 +293,14 @@ POST /mcp/call/query_graph         - Graph traversal`;
 function AgentCard({ agent }: { agent: AgentWithConsent }) {
   const updateConsent = useUpdateConsent();
   const revokeAgent = useRevokeAgent();
+  const deleteAgent = useDeleteAgent();
   const queryClient = useQueryClient();
   const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showMcpSetup, setShowMcpSetup] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isRevoked = agent.status === 'revoked';
 
   const getPermissionForResource = (resource: string): 'read' | 'write' | 'none' => {
     const rule = agent.permissions.find((p) => p.resource === resource);
@@ -341,6 +345,16 @@ function AgentCard({ agent }: { agent: AgentWithConsent }) {
     }
   };
 
+  const handleDelete = async () => {
+    try {
+      await deleteAgent.mutateAsync(agent.agent_id);
+      setShowDeleteConfirm(false);
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete agent');
+    }
+  };
+
   const placeholder = '<YOUR_API_KEY>';
   const mcpConfig = JSON.stringify({
     mcpServers: {
@@ -376,10 +390,17 @@ POST /mcp/call/query_graph         - Graph traversal`;
               <CardTitle className="text-lg">
                 {agent.agent_name || agent.agent_id}
               </CardTitle>
-              <Badge variant="secondary" className="bg-green-500/20 text-green-400 border-green-500/30">
-                <span className="size-1.5 rounded-full bg-green-400 mr-1" />
-                Active
-              </Badge>
+              {isRevoked ? (
+                <Badge variant="secondary" className="bg-red-500/20 text-red-400 border-red-500/30">
+                  <span className="size-1.5 rounded-full bg-red-400 mr-1" />
+                  Revoked
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="bg-green-500/20 text-green-400 border-green-500/30">
+                  <span className="size-1.5 rounded-full bg-green-400 mr-1" />
+                  Active
+                </Badge>
+              )}
             </div>
             <div className="font-mono text-xs text-muted-foreground mt-1">{agent.agent_id}</div>
           </div>
@@ -411,7 +432,7 @@ POST /mcp/call/query_graph         - Graph traversal`;
                 variant="outline"
                 size="xs"
                 onClick={() => handleSetAll(level)}
-                disabled={updateConsent.isPending}
+                disabled={isRevoked || updateConsent.isPending}
               >
                 {level === 'none' ? 'None' : level === 'read' ? 'Read' : 'Read & Write'}
               </Button>
@@ -442,7 +463,7 @@ POST /mcp/call/query_graph         - Graph traversal`;
                       size="xs"
                       variant={current === level ? 'default' : 'outline'}
                       onClick={() => handleSetPermission(resource.key, level)}
-                      disabled={updateConsent.isPending || current === level}
+                      disabled={isRevoked || updateConsent.isPending || current === level}
                       className={
                         current === level
                           ? level === 'none'
@@ -463,8 +484,8 @@ POST /mcp/call/query_graph         - Graph traversal`;
         </div>
       </CardContent>
 
-      {/* MCP Setup */}
-      <Collapsible open={showMcpSetup} onOpenChange={setShowMcpSetup}>
+      {/* MCP Setup — hidden when revoked */}
+      {!isRevoked && <Collapsible open={showMcpSetup} onOpenChange={setShowMcpSetup}>
         <div className="border-t border-border">
           <CollapsibleTrigger asChild>
             <button
@@ -542,41 +563,76 @@ POST /mcp/call/query_graph         - Graph traversal`;
             </div>
           </CollapsibleContent>
         </div>
-      </Collapsible>
+      </Collapsible>}
 
-      {/* Revoke Section */}
+      {/* Revoke / Delete Section */}
       <div className="border-t border-border px-6 py-4 flex justify-end">
-        <AlertDialog open={showRevokeConfirm} onOpenChange={setShowRevokeConfirm}>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
-            onClick={() => setShowRevokeConfirm(true)}
-          >
-            Revoke Access
-          </Button>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle className="flex items-center gap-2">
-                <AlertTriangle className="size-5 text-red-400" />
-                Revoke all access for {agent.agent_name || agent.agent_id}?
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                This agent will immediately lose all access to your data. This action cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                onClick={handleRevoke}
-                disabled={revokeAgent.isPending}
-              >
-                {revokeAgent.isPending ? 'Revoking...' : 'Yes, Revoke Access'}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        {isRevoked ? (
+          <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              <Trash2 className="size-4 mr-1.5" />
+              Delete Agent
+            </Button>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <Trash2 className="size-5 text-red-400" />
+                  Permanently delete {agent.agent_name || agent.agent_id}?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently remove all data for this agent including API keys, consent rules, and registry entry. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  onClick={handleDelete}
+                  disabled={deleteAgent.isPending}
+                >
+                  {deleteAgent.isPending ? 'Deleting...' : 'Yes, Delete Permanently'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : (
+          <AlertDialog open={showRevokeConfirm} onOpenChange={setShowRevokeConfirm}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              onClick={() => setShowRevokeConfirm(true)}
+            >
+              Revoke Access
+            </Button>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <AlertTriangle className="size-5 text-red-400" />
+                  Revoke all access for {agent.agent_name || agent.agent_id}?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This agent will immediately lose all access to your data. You can delete the agent afterwards.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  onClick={handleRevoke}
+                  disabled={revokeAgent.isPending}
+                >
+                  {revokeAgent.isPending ? 'Revoking...' : 'Yes, Revoke Access'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </div>
     </Card>
   );

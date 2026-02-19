@@ -13,6 +13,7 @@
 import { withUserSchema } from '@/db/client';
 import { logAuditEntry } from './audit.service';
 import { logger } from '@/utils/logger';
+import { revokeApiKeysForAgent, deleteApiKeysForAgent, deleteAgentRegistryEntry } from './auth.service';
 
 /**
  * Permission levels
@@ -302,6 +303,9 @@ export async function revokeAllAgentConsent(
   userId: string,
   agentId: string
 ): Promise<void> {
+  // Revoke API keys first so the agent is immediately blocked at the auth layer
+  await revokeApiKeysForAgent(userId, agentId);
+
   await withUserSchema(userId, async (tx) => {
     await tx.unsafe(
       `
@@ -324,6 +328,44 @@ export async function revokeAllAgentConsent(
     });
   } catch (err) {
     logger.error('Failed to log consent audit entry', { error: String(err) });
+  }
+}
+
+/**
+ * Delete all data for an agent
+ *
+ * Hard-deletes consent rules, API keys, and agent registry entry.
+ * Agent must have all keys revoked first.
+ *
+ * @param userId - User ID for schema isolation
+ * @param agentId - Agent ID
+ */
+export async function deleteAllAgentData(
+  userId: string,
+  agentId: string
+): Promise<void> {
+  // Delete consent rules from user schema
+  await withUserSchema(userId, async (tx) => {
+    await tx.unsafe(
+      `DELETE FROM consent_rules WHERE agent_id = $1`,
+      [agentId]
+    );
+  });
+
+  // Delete API keys and agent registry entry from public schema
+  await deleteApiKeysForAgent(userId, agentId);
+  await deleteAgentRegistryEntry(userId, agentId);
+
+  // Log to audit trail (non-fatal)
+  try {
+    await logAuditEntry(userId, {
+      agentId,
+      action: 'agent_deleted',
+      resource: '*',
+      details: {},
+    });
+  } catch (err) {
+    logger.error('Failed to log agent deletion audit entry', { error: String(err) });
   }
 }
 

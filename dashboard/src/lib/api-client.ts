@@ -212,6 +212,10 @@ export const agentsApi = {
     apiCall<{ success: boolean }>(`/consent/${agentId}`, {
       method: 'DELETE',
     }),
+  delete: (agentId: string) =>
+    apiCall<{ success: boolean }>(`/consent/${agentId}/delete`, {
+      method: 'DELETE',
+    }),
 };
 
 // Auth API
