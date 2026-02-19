@@ -1,0 +1,9 @@
+{
+  "name": "epitome",
+  "description": "Personal AI memory — gives every AI agent shared, persistent memory of you. Profile, tables, semantic search, and a knowledge graph.",
+  "version": "1.0.0",
+  "author": { "name": "Epitome", "url": "https://epitome.fyi" },
+  "homepage": "https://epitome.fyi",
+  "repository": "https://github.com/gunning4it/epitome",
+  "license": "MIT"
+}
