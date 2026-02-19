@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.6",
+    "@modelcontextprotocol/ext-apps": "^1.0.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@x402/core": "^2.3.1",
     "@x402/evm": "^2.3.1",
