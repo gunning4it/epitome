@@ -8,7 +8,7 @@ export default function Onboarding() {
 
   useEffect(() => {
     if (session && !isLoading) {
-      navigate('/profile', { replace: true });
+      navigate('/agents', { replace: true });
     }
   }, [session, isLoading, navigate]);
 
