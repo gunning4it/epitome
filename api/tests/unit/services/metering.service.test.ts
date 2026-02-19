@@ -167,7 +167,7 @@ describe('metering.service', () => {
       const limits = await getTierLimits('free');
 
       expect(limits).toEqual({
-        maxTables: 5,
+        maxTables: 2,
         maxAgents: 3,
         maxGraphEntities: 100,
         auditRetentionDays: 30,

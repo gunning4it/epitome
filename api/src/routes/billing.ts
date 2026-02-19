@@ -7,7 +7,7 @@
 
 import { Hono } from 'hono';
 import type { HonoEnv } from '@/types/hono';
-import { requireAuth } from '@/middleware/auth';
+import { requireUser } from '@/middleware/auth';
 import {
   createCheckoutSession,
   createPortalSession,
@@ -22,8 +22,8 @@ import { eq } from 'drizzle-orm';
 
 const billing = new Hono<HonoEnv>();
 
-// All billing routes require session auth
-billing.use('*', requireAuth);
+// All billing routes require session auth (agents cannot access billing)
+billing.use('*', requireUser);
 
 /**
  * GET /v1/billing/usage

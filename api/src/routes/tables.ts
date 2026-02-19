@@ -16,6 +16,7 @@ import {
   deleteRecord,
 } from '@/services/table.service';
 import { ingestTableRecord } from '@/services/writeIngestion.service';
+import { getEffectiveTier } from '@/services/metering.service';
 import { executeSandboxedQuery } from '@/services/sqlSandbox.service';
 import { requireConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
@@ -113,6 +114,7 @@ tables.post(
     // Determine origin
     const origin = authType === 'session' ? 'user_typed' : 'ai_inferred';
     const changedBy = authType === 'api_key' && agentId ? agentId : 'user';
+    const tier = getEffectiveTier(c);
 
     // Insert record
     const ingested = await ingestTableRecord({
@@ -121,6 +123,7 @@ tables.post(
       data: body,
       changedBy,
       origin,
+      tier,
     });
 
     // Log audit entry

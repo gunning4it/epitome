@@ -1870,7 +1870,7 @@ export async function extractEntitiesFromRecord(
           agentSource: 'entity_extraction',
         };
 
-        createdEntity = await createEntity(userId, entityInput);
+        createdEntity = await createEntity(userId, entityInput, tier || 'free');
         entityId = createdEntity.id!;
       }
 

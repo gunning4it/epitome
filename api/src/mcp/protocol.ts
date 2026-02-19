@@ -26,15 +26,16 @@ import { reviewMemories } from './tools/reviewMemories.js';
  * Extract userId and agentId from the transport's authInfo.extra
  */
 function extractContext(extra: Record<string, unknown>): McpContext {
-  const authInfo = extra.authInfo as { extra?: { userId?: string; agentId?: string } } | undefined;
+  const authInfo = extra.authInfo as { extra?: { userId?: string; agentId?: string; tier?: string } } | undefined;
   const userId = authInfo?.extra?.userId;
   const agentId = authInfo?.extra?.agentId || 'unknown-agent';
+  const tier = authInfo?.extra?.tier || 'free';
 
   if (!userId) {
     throw new Error('UNAUTHORIZED: Authentication required.');
   }
 
-  return { userId, agentId };
+  return { userId, agentId, tier };
 }
 
 /**

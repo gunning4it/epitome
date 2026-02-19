@@ -94,7 +94,8 @@ describe('write ingestion service', () => {
       { food: 'burrito' },
       'agent',
       'ai_stated',
-      'Meal tracking'
+      'Meal tracking',
+      'free'
     );
     expect(result.recordId).toBe(123);
     expect(result.writeId).toMatch(
@@ -150,7 +151,8 @@ describe('write ingestion service', () => {
       }),
       'agent',
       'ai_stated',
-      'Fallback storage for memories while embedding/pending queue is unavailable'
+      'Fallback storage for memories while embedding/pending queue is unavailable',
+      'free'
     );
     expect(result.writeStatus).toBe('pending_enrichment');
     expect(result.sourceRef).toBe('memory_backlog:88');

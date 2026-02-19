@@ -12,6 +12,7 @@ import { zValidator } from '@hono/zod-validator';
 import type { HonoEnv } from '@/types/hono';
 import { requireAuth } from '@/middleware/auth';
 import { expensiveOperationRateLimit } from '@/middleware/rateLimit';
+import { getEffectiveTier } from '@/services/metering.service';
 import { logger } from '@/utils/logger';
 import {
   createEntity,
@@ -226,12 +227,13 @@ graph.post(
 
     // Determine origin
     const origin = body.origin || (authType === 'session' ? 'user_stated' : 'ai_inferred');
+    const tier = getEffectiveTier(c);
 
     const entity = await createEntity(userId, {
       ...body,
       origin,
       agentSource: agentId,
-    });
+    }, tier);
 
     // Log audit entry
     await logAuditEntry(userId, {

@@ -27,6 +27,7 @@ export enum RateLimitTier {
   API_KEY_FREE = 'api_key_free', // Free tier API keys
   API_KEY_PRO = 'api_key_pro', // Pro tier API keys
   MCP_TOOL = 'mcp_tool', // MCP tool calls
+  WEBHOOK = 'webhook', // Webhook endpoints (IP-based)
 }
 
 /**
@@ -58,6 +59,11 @@ const RATE_LIMIT_CONFIG = {
     duration: 60,
     blockDuration: 60,
   },
+  [RateLimitTier.WEBHOOK]: {
+    points: 100, // 100 requests per minute per IP
+    duration: 60,
+    blockDuration: 300, // block for 5 minutes after violation
+  },
 };
 
 // NOTE: Rate limit state is in-memory only. Resets on server restart and is
@@ -82,6 +88,9 @@ const rateLimiters: Record<RateLimitTier, RateLimiterMemory> = {
   ),
   [RateLimitTier.MCP_TOOL]: new RateLimiterMemory(
     RATE_LIMIT_CONFIG[RateLimitTier.MCP_TOOL]
+  ),
+  [RateLimitTier.WEBHOOK]: new RateLimiterMemory(
+    RATE_LIMIT_CONFIG[RateLimitTier.WEBHOOK]
   ),
 };
 

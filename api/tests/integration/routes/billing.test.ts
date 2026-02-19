@@ -21,7 +21,7 @@ vi.mock('@/services/metering.service', () => ({
     graphEntities: 47,
   }),
   getTierLimits: vi.fn().mockResolvedValue({
-    maxTables: 5,
+    maxTables: 2,
     maxAgents: 3,
     maxGraphEntities: 100,
     auditRetentionDays: 30,
@@ -137,7 +137,7 @@ describe('Billing API Integration Tests', () => {
 
       // Limits
       expect(json.limits).toEqual({
-        maxTables: 5,
+        maxTables: 2,
         maxAgents: 3,
         maxGraphEntities: 100,
       });

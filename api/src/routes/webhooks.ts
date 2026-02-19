@@ -10,6 +10,7 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { HonoEnv } from '@/types/hono';
+import { consumeRateLimit, RateLimitTier } from '@/services/rateLimit.service';
 import {
   constructWebhookEvent,
   insertStripeEvent,
@@ -36,7 +37,20 @@ webhooks.use('*', async (c, next) => {
 // 2. Body cap — 256KB (Stripe payloads can include metadata/expanded objects)
 webhooks.use('*', bodyLimit({ maxSize: 256 * 1024 }));
 
-// 3. Dedicated error handler — always return 200 to prevent Stripe retries
+// 3. IP-based rate limiting — 100 req/min per IP
+webhooks.use('*', async (c, next) => {
+  const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
+    || c.req.header('x-real-ip')
+    || 'unknown';
+  const result = await consumeRateLimit(`webhook:ip:${ip}`, RateLimitTier.WEBHOOK);
+  if (!result.allowed) {
+    c.header('Retry-After', String(result.retryAfter || 60));
+    return c.json({ error: 'Rate limit exceeded' }, 429);
+  }
+  return next();
+});
+
+// 4. Dedicated error handler — always return 200 to prevent Stripe retries
 webhooks.onError((err, c) => {
   logger.error('Webhook error', { error: String(err), path: c.req.path });
   return c.json({ received: true, error: 'Internal processing error' }, 200);

@@ -47,7 +47,7 @@ export async function getTierLimits(tier: 'free' | 'pro' | 'enterprise'): Promis
   if (rows.length > 0 && rows[0].value) {
     const v = rows[0].value as Record<string, number>;
     const limits: TierLimits = {
-      maxTables: v.max_tables ?? (tier === 'free' ? 5 : -1),
+      maxTables: v.max_tables ?? (tier === 'free' ? 2 : -1),
       maxAgents: v.max_agents ?? (tier === 'free' ? 3 : -1),
       maxGraphEntities: v.max_graph_entities ?? (tier === 'free' ? 100 : -1),
       auditRetentionDays: v.audit_retention_days ?? (tier === 'free' ? 30 : 365),
@@ -58,7 +58,7 @@ export async function getTierLimits(tier: 'free' | 'pro' | 'enterprise'): Promis
 
   // Fallback defaults if no system_config entry
   const defaults: Record<string, TierLimits> = {
-    free: { maxTables: 5, maxAgents: 3, maxGraphEntities: 100, auditRetentionDays: 30 },
+    free: { maxTables: 2, maxAgents: 3, maxGraphEntities: 100, auditRetentionDays: 30 },
     pro: { maxTables: -1, maxAgents: -1, maxGraphEntities: -1, auditRetentionDays: 365 },
     enterprise: { maxTables: -1, maxAgents: -1, maxGraphEntities: -1, auditRetentionDays: -1 },
   };

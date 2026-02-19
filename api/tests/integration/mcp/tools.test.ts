@@ -43,6 +43,7 @@ describe('MCP Tools Integration Tests', () => {
     mcpContext = {
       userId: testUser.userId,
       agentId: 'test-agent',
+      tier: 'pro',
     };
 
     // Grant broad consent for test agent using the consent service

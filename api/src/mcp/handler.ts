@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { getToolDefinitions, executeTool, McpContext } from './server.js';
 import { createMcpProtocolServer } from './protocol.js';
 import { logger } from '@/utils/logger';
-import { recordApiCall } from '@/services/metering.service';
+import { recordApiCall, getEffectiveTier } from '@/services/metering.service';
 import type { HonoEnv } from '@/types/hono';
 
 /**
@@ -56,8 +56,9 @@ function buildMcpContext(c: Context): McpContext {
   // Use agentId from auth middleware (API key's stored agentId)
   // Fall back to X-Agent-ID header or User-Agent
   const agentId = c.get('agentId') || extractAgentId(c);
+  const tier = getEffectiveTier(c as Context<HonoEnv>);
 
-  return { userId, agentId };
+  return { userId, agentId, tier };
 }
 
 /**
@@ -145,7 +146,13 @@ export function createMcpRoutes(): Hono<HonoEnv> {
       x402InitAttempted = true;
       x402ServerInstance = await initX402Server();
     }
-    if (!x402ServerInstance) return next();
+    if (!x402ServerInstance) {
+      // Fail closed: free-tier users cannot bypass payment when x402 server is unavailable
+      return c.json(
+        { jsonrpc: '2.0', error: { code: -32000, message: 'Payment service temporarily unavailable' }, id: null },
+        503
+      );
+    }
 
     try {
       const { paymentMiddleware } = await import('@x402/hono');
@@ -178,10 +185,13 @@ export function createMcpRoutes(): Hono<HonoEnv> {
       });
     } catch (err) {
       // If x402 verification fails, the middleware itself returns 402
-      // Any other error: log and let the request through (graceful degradation)
       if (err instanceof Response) throw err;
-      logger.error('x402: middleware error', { error: String(err) });
-      return next();
+      // Fail closed: free-tier users cannot bypass payment on x402 errors
+      logger.error('x402: middleware error, denying free-tier request', { error: String(err) });
+      return c.json(
+        { jsonrpc: '2.0', error: { code: -32000, message: 'Payment service temporarily unavailable' }, id: null },
+        503
+      );
     }
   });
 
@@ -255,7 +265,7 @@ export function createMcpRoutes(): Hono<HonoEnv> {
           token: c.req.header('Authorization')?.replace('Bearer ', '') || '',
           clientId: 'epitome',
           scopes: [],
-          extra: { userId: userId || '', agentId },
+          extra: { userId: userId || '', agentId, tier: getEffectiveTier(c as any) },
         },
       });
       return response;

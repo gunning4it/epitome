@@ -265,9 +265,13 @@ export async function createApiKeyForUser(
     ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000)
     : null;
 
-  // Enforce agent limit for agent-specific keys
+  // Look up user's current tier so new keys inherit it
+  const [user] = await db.select({ tier: users.tier }).from(users).where(eq(users.id, userId)).limit(1);
+  const effectiveTier = user?.tier || tier || 'free';
+
+  // Enforce agent limit for agent-specific keys (uses effectiveTier, not caller-supplied tier)
   if (agentId) {
-    const limits = await getTierLimits((tier || 'free') as 'free' | 'pro' | 'enterprise');
+    const limits = await getTierLimits(effectiveTier as 'free' | 'pro' | 'enterprise');
     if (limits.maxAgents !== -1) {
       const countRows = await pgSql`
         SELECT COUNT(DISTINCT agent_id)::int AS count
@@ -282,10 +286,6 @@ export async function createApiKeyForUser(
       }
     }
   }
-
-  // Look up user's current tier so new keys inherit it
-  const [user] = await db.select({ tier: users.tier }).from(users).where(eq(users.id, userId)).limit(1);
-  const effectiveTier = user?.tier || tier || 'free';
 
   // Insert into database
   const [apiKey] = await db

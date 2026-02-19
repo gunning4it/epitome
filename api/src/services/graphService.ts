@@ -14,6 +14,7 @@
 import { withUserSchema, TransactionSql } from '@/db/client';
 import { Entity, Edge, MemoryMeta } from '@/db/schema';
 import { createMemoryMetaInternal, ORIGIN_CONFIDENCE } from './memoryQuality.service';
+import { withTierLimitLock } from './metering.service';
 
 // =====================================================
 // TYPES & CONSTANTS
@@ -331,18 +332,48 @@ async function getEntityByNameInternal(
  *
  * @param userId - User ID for schema isolation
  * @param input - Entity creation data
+ * @param tier - User tier for limit enforcement (default 'free')
  * @returns Created entity with metadata (or existing entity if duplicate found)
  */
 export async function createEntity(
   userId: string,
-  input: CreateEntityInput
+  input: CreateEntityInput,
+  tier: string = 'free'
 ): Promise<EntityWithMeta> {
-  return withUserSchema(userId, async (tx) => {
-    const confidence = input.confidence ?? getInitialConfidence(input.origin);
+  const confidence = input.confidence ?? getInitialConfidence(input.origin);
 
-    // Simple exact match check (unique constraint on type + lower(name))
-    // For more advanced deduplication, use the deduplication service externally
-    const existing = await tx`
+  // First check for existing entity (dedup doesn't count against limit)
+  const existing = await withUserSchema(userId, async (tx) => {
+    const rows = await tx`
+      SELECT id FROM entities
+      WHERE type = ${input.type}
+        AND lower(name) = lower(${input.name})
+        AND _deleted_at IS NULL
+      LIMIT 1
+    `.execute();
+    return rows;
+  });
+
+  if (existing.length > 0) {
+    return withUserSchema(userId, async (tx) => {
+      const entity = await getEntityInternal(tx, existing[0].id);
+      if (entity) {
+        await tx`
+          UPDATE entities
+          SET mention_count = mention_count + 1,
+              last_seen = NOW()
+          WHERE id = ${existing[0].id}
+        `.execute();
+        return entity;
+      }
+      throw new Error('INTERNAL_ERROR: Entity disappeared during dedup check');
+    });
+  }
+
+  // New entity: enforce tier limit with advisory lock
+  return withTierLimitLock(userId, tier, 'graphEntities', async (tx) => {
+    // Double-check dedup inside lock (another request may have created it)
+    const innerCheck = await tx`
       SELECT id FROM entities
       WHERE type = ${input.type}
         AND lower(name) = lower(${input.name})
@@ -350,19 +381,15 @@ export async function createEntity(
       LIMIT 1
     `.execute();
 
-    if (existing.length > 0) {
-      // Return existing entity instead of throwing error
-      // This allows idempotent entity creation
-      const entity = await getEntityInternal(tx, existing[0].id);
+    if (innerCheck.length > 0) {
+      const entity = await getEntityInternal(tx, innerCheck[0].id);
       if (entity) {
-        // Update mention_count and last_seen
         await tx`
           UPDATE entities
           SET mention_count = mention_count + 1,
               last_seen = NOW()
-          WHERE id = ${existing[0].id}
+          WHERE id = ${innerCheck[0].id}
         `.execute();
-
         return entity;
       }
     }

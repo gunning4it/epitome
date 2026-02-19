@@ -45,6 +45,7 @@ export async function saveMemory(args: SaveMemoryArgs, context: McpContext) {
     changedBy: agentId,
     origin: 'ai_stated',
     writeId,
+    tier: context.tier,
   });
 
   // Trigger async thread linking (non-blocking)

@@ -31,6 +31,7 @@ import { reviewMemories } from './tools/reviewMemories.js';
 export interface McpContext {
   userId: string;
   agentId: string;
+  tier: string;
 }
 
 /**

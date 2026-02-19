@@ -16,7 +16,7 @@ import { Context, Next, MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { db } from '@/db/client';
 import { eq, and, isNull, or, gt } from 'drizzle-orm';
-import { apiKeys, sessions } from '@/db/schema';
+import { apiKeys, sessions, users } from '@/db/schema';
 import crypto from 'crypto';
 import { hashSessionToken } from '@/utils/crypto';
 import { logger } from '@/utils/logger';
@@ -57,6 +57,11 @@ export const authResolver: MiddlewareHandler = async (c: Context, next: Next) =>
         c.set('authType', 'session');
       } else {
         c.set('authType', 'api_key');
+      }
+      // Allow tests to set tier explicitly
+      const testTier = c.req.header('x-test-tier') as 'free' | 'pro' | 'enterprise' | undefined;
+      if (testTier) {
+        c.set('tier', testTier);
       }
 
       logger.debug('authResolver middleware END (test headers), calling next()');
@@ -101,6 +106,7 @@ export const authResolver: MiddlewareHandler = async (c: Context, next: Next) =>
 
     if (result) {
       c.set('userId', result.userId);
+      c.set('tier', result.tier);
       c.set('authType', 'session');
       return next();
     }
@@ -241,17 +247,21 @@ async function validateApiKey(
  */
 async function validateSession(
   token: string
-): Promise<{ userId: string } | null> {
+): Promise<{ userId: string; tier: 'free' | 'pro' | 'enterprise' } | null> {
   try {
     const now = new Date();
 
     // H-1 SECURITY FIX: Hash the token before querying
     const tokenHash = hashSessionToken(token);
 
-    // Query session by hashed token
-    const [session] = await db
-      .select()
+    // Query session by hashed token, JOIN users to get tier
+    const [result] = await db
+      .select({
+        userId: sessions.userId,
+        tier: users.tier,
+      })
       .from(sessions)
+      .innerJoin(users, eq(sessions.userId, users.id))
       .where(
         and(
           eq(sessions.tokenHash, tokenHash),
@@ -260,12 +270,13 @@ async function validateSession(
       )
       .limit(1);
 
-    if (!session) {
+    if (!result) {
       return null;
     }
 
     return {
-      userId: session.userId,
+      userId: result.userId,
+      tier: (result.tier || 'free') as 'free' | 'pro' | 'enterprise',
     };
   } catch (error) {
     logger.error('Error validating session', { error: String(error) });

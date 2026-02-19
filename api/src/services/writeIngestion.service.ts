@@ -266,6 +266,7 @@ export async function ingestTableRecord(params: {
   origin: string;
   tableDescription?: string;
   writeId?: string;
+  tier?: string;
 }): Promise<TableIngestionResult> {
   const writeId = params.writeId || createWriteId();
   const startedAt = Date.now();
@@ -275,7 +276,8 @@ export async function ingestTableRecord(params: {
     params.data,
     params.changedBy,
     params.origin,
-    params.tableDescription
+    params.tableDescription,
+    params.tier || 'free'
   );
 
   const sourceRef = `${params.tableName}:${recordId}`;
@@ -358,6 +360,7 @@ export async function ingestMemoryText(params: {
   origin: string;
   sourceRefHint?: string;
   writeId?: string;
+  tier?: string;
 }): Promise<MemoryIngestionResult> {
   const writeId = params.writeId || createWriteId();
   const startedAt = Date.now();
@@ -542,7 +545,8 @@ export async function ingestMemoryText(params: {
         },
         params.changedBy,
         params.origin,
-        'Fallback storage for memories while embedding/pending queue is unavailable'
+        'Fallback storage for memories while embedding/pending queue is unavailable',
+        params.tier || 'free'
       );
 
       const sourceRef = `memory_backlog:${backlogRecordId}`;

@@ -27,7 +27,8 @@ export async function addTableRecord(
     origin?: 'user_typed' | 'user_stated' | 'ai_stated' | 'ai_inferred' | 'ai_pattern' | 'imported';
     agentSource?: string;
   },
-  tableDescription?: string
+  tableDescription?: string,
+  tier: string = 'free'
 ): Promise<number> {
   return insertRecord(
     userId,
@@ -35,7 +36,8 @@ export async function addTableRecord(
     data,
     meta?.agentSource || 'user',
     meta?.origin || 'user_typed',
-    tableDescription
+    tableDescription,
+    tier
   );
 }
 

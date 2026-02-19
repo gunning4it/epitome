@@ -49,6 +49,7 @@ export async function addRecord(args: AddRecordArgs, context: McpContext) {
     origin: 'ai_stated',
     tableDescription: args.tableDescription,
     writeId,
+    tier: context.tier,
   });
 
   // Auto-save record as searchable memory (best effort, non-blocking semantics)
@@ -70,6 +71,7 @@ export async function addRecord(args: AddRecordArgs, context: McpContext) {
     origin: 'ai_stated',
     sourceRefHint: `${table}:${ingested.recordId}:summary`,
     writeId,
+    tier: context.tier,
   });
 
   return {
