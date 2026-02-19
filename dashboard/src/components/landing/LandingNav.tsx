@@ -67,7 +67,7 @@ export default function LandingNav() {
         <div className="flex items-center gap-3">
           {!isLoading && (
             <Button asChild size="sm" variant={isAuthenticated ? 'default' : 'outline'}>
-              <Link to={isAuthenticated ? '/profile' : '/onboarding'}>
+              <Link to={isAuthenticated ? '/agents' : '/onboarding'}>
                 {isAuthenticated ? 'Dashboard' : 'Sign In'}
               </Link>
             </Button>

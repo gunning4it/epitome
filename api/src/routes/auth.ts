@@ -211,17 +211,17 @@ auth.get('/callback', zValidator('query', callbackQuerySchema), async (c) => {
 
   // Redirect after login
   const dashboardUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
-  const redirectTarget = stateData.redirectUri || '/profile';
+  const redirectTarget = stateData.redirectUri || '/agents';
 
   if (isNewUser) {
-    return c.redirect(`${dashboardUrl}/profile`);
+    return c.redirect(`${dashboardUrl}/agents`);
   }
 
   // C-2 SECURITY FIX: Validate redirect target against allowlist
   if (redirectTarget.startsWith('http://') || redirectTarget.startsWith('https://')) {
     if (!isAllowedRedirect(redirectTarget)) {
       logger.warn('Blocked open redirect attempt', { redirectTarget });
-      return c.redirect(`${dashboardUrl}/profile`);
+      return c.redirect(`${dashboardUrl}/agents`);
     }
     return c.redirect(redirectTarget);
   }
