@@ -18,6 +18,7 @@
 
 import crypto from 'crypto';
 import { Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { getCookie, setCookie } from 'hono/cookie';
 import { db } from '@/db/client';
 import { eq, and, isNull, gt } from 'drizzle-orm';
@@ -294,21 +295,21 @@ export async function oauthAuthorize(c: Context) {
 
   // Validate required params
   if (!clientId || !redirectUri || !codeChallenge || !responseType) {
-    return c.html(renderErrorPage('Missing required parameters: client_id, redirect_uri, code_challenge, response_type'), 400);
+    return htmlWithRelaxedCsp(c, renderErrorPage('Missing required parameters: client_id, redirect_uri, code_challenge, response_type'), 400);
   }
 
   if (responseType !== 'code') {
-    return c.html(renderErrorPage('Unsupported response_type. Only "code" is supported.'), 400);
+    return htmlWithRelaxedCsp(c, renderErrorPage('Unsupported response_type. Only "code" is supported.'), 400);
   }
 
   if (codeChallengeMethod !== 'S256') {
-    return c.html(renderErrorPage('Unsupported code_challenge_method. Only "S256" is supported.'), 400);
+    return htmlWithRelaxedCsp(c, renderErrorPage('Unsupported code_challenge_method. Only "S256" is supported.'), 400);
   }
 
   // RFC 8707: Validate resource parameter if provided
   const resourceError = validateResource(resource);
   if (resourceError) {
-    return c.html(renderErrorPage(resourceError), 400);
+    return htmlWithRelaxedCsp(c, renderErrorPage(resourceError), 400);
   }
 
   // Look up client
@@ -319,20 +320,20 @@ export async function oauthAuthorize(c: Context) {
     .limit(1);
 
   if (!client) {
-    return c.html(renderErrorPage('Unknown client_id'), 400);
+    return htmlWithRelaxedCsp(c, renderErrorPage('Unknown client_id'), 400);
   }
 
   // Validate redirect_uri against registered URIs
   const registeredUris = client.redirectUris as string[];
   if (!registeredUris.includes(redirectUri)) {
-    return c.html(renderErrorPage('redirect_uri does not match any registered URI for this client'), 400);
+    return htmlWithRelaxedCsp(c, renderErrorPage('redirect_uri does not match any registered URI for this client'), 400);
   }
 
   // Check session cookie
   const sessionToken = getCookie(c, 'epitome_session');
   if (!sessionToken) {
     // No session — render login page
-    return c.html(renderLoginPage(c.req.url), 200);
+    return htmlWithRelaxedCsp(c, renderLoginPage(c.req.url));
   }
 
   // Validate session
@@ -346,7 +347,7 @@ export async function oauthAuthorize(c: Context) {
 
   if (!session) {
     // Expired/invalid session — render login page
-    return c.html(renderLoginPage(c.req.url), 200);
+    return htmlWithRelaxedCsp(c, renderLoginPage(c.req.url));
   }
 
   // Valid session — look up user for consent page
@@ -367,7 +368,8 @@ export async function oauthAuthorize(c: Context) {
   });
 
   // Render consent page
-  return c.html(
+  return htmlWithRelaxedCsp(
+    c,
     renderConsentPage({
       clientName: client.clientName || clientId,
       scope,
@@ -379,8 +381,7 @@ export async function oauthAuthorize(c: Context) {
       state,
       resource: resource || '',
       csrfToken,
-    }),
-    200
+    })
   );
 }
 
@@ -406,11 +407,11 @@ export async function oauthAuthorizeConsent(c: Context) {
   const csrfFromForm = body['csrf_token'] as string;
   const csrfFromCookie = getCookie(c, 'csrf_token');
   if (!csrfFromForm || !csrfFromCookie || !constantTimeCompare(csrfFromForm, csrfFromCookie)) {
-    return c.html(renderErrorPage('CSRF token validation failed'), 403);
+    return htmlWithRelaxedCsp(c, renderErrorPage('CSRF token validation failed'), 403);
   }
 
   if (!clientId || !redirectUri || !codeChallenge) {
-    return c.html(renderErrorPage('Missing required form fields'), 400);
+    return htmlWithRelaxedCsp(c, renderErrorPage('Missing required form fields'), 400);
   }
 
   // Denied
@@ -425,7 +426,7 @@ export async function oauthAuthorizeConsent(c: Context) {
   // Must have valid session
   const sessionToken = getCookie(c, 'epitome_session');
   if (!sessionToken) {
-    return c.html(renderErrorPage('Session expired. Please try again.'), 401);
+    return htmlWithRelaxedCsp(c, renderErrorPage('Session expired. Please try again.'), 401);
   }
 
   const tokenHash = hashSessionToken(sessionToken);
@@ -437,7 +438,7 @@ export async function oauthAuthorizeConsent(c: Context) {
     .limit(1);
 
   if (!session) {
-    return c.html(renderErrorPage('Session expired. Please try again.'), 401);
+    return htmlWithRelaxedCsp(c, renderErrorPage('Session expired. Please try again.'), 401);
   }
 
   // M-11 SECURITY FIX: Reduce auth code TTL from 10 minutes to 60 seconds
@@ -621,37 +622,94 @@ export async function oauthToken(c: Context) {
 
 // ─── HTML Page Renderers ────────────────────────────────────────────
 
+/**
+ * Wrap c.html() with a relaxed CSP for server-rendered OAuth pages.
+ * The global CSP from securityHeaders blocks inline styles (stale hash)
+ * and Google Fonts. This override is safe because:
+ * - All values are HTML-escaped (no CSS injection vectors)
+ * - script-src absent → defaults to 'none' (blocks all scripts)
+ * - connect-src 'none' prevents any fetches
+ */
+function htmlWithRelaxedCsp(c: Context, html: string, status: ContentfulStatusCode = 200) {
+  c.header(
+    'Content-Security-Policy',
+    "default-src 'none'; style-src 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'none'; frame-ancestors 'none'"
+  );
+  return c.html(html, status);
+}
+
 const FONT_LINKS = `
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Instrument+Serif&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 `;
 
 const PAGE_STYLES = `
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a1a; color: #fafafa; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .card { background: #1f1f1f; border: 1px solid #333338; border-radius: 14px; padding: 2.5rem 2rem; max-width: 420px; width: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #fafafa;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh;
+      background-image: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(59,130,246,0.08) 0%, transparent 70%);
+    }
+    .card {
+      background: #141414;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 2.5rem 2rem;
+      max-width: 420px; width: 100%;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.03), 0 4px 24px rgba(0,0,0,0.4);
+      transition: box-shadow 0.3s ease;
+    }
+    .card:hover {
+      box-shadow: 0 0 0 1px rgba(59,130,246,0.15), 0 4px 32px rgba(59,130,246,0.06), 0 4px 24px rgba(0,0,0,0.4);
+    }
     .logo { font-family: 'Instrument Serif', serif; font-size: 1.75rem; font-weight: 400; letter-spacing: -0.02em; color: #fff; margin-bottom: 1.5rem; text-align: center; }
     .logo span { color: #3b82f6; }
     h2 { font-family: 'Inter', sans-serif; font-size: 1.125rem; font-weight: 600; color: #fafafa; margin-bottom: 1rem; text-align: center; }
-    .info { background: #2a2a2a; border: 1px solid #333338; border-radius: 10px; padding: 1rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
-    .info .label { color: #808080; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; margin-bottom: 0.25rem; }
+    .info { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; font-size: 0.9rem; }
+    .info .label { color: #666; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-bottom: 0.25rem; }
     .info .value { color: #fafafa; font-weight: 500; word-break: break-all; }
-    .info + .info { margin-top: 0.75rem; }
-    .scope-list { margin: 0.5rem 0; padding-left: 1.25rem; }
-    .scope-list li { color: #fafafa; font-size: 0.875rem; margin-bottom: 0.25rem; }
-    .btn-row { display: flex; gap: 0.75rem; }
-    .btn { flex: 1; padding: 0.75rem 1rem; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 500; font-family: 'Inter', sans-serif; cursor: pointer; text-align: center; text-decoration: none; display: inline-block; transition: all 0.2s ease; }
+    .scope-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
+    .scope-badge {
+      font-family: 'Fira Code', 'Courier New', monospace;
+      font-size: 0.75rem; font-weight: 500;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      display: inline-block;
+    }
+    .scope-read { background: rgba(255,255,255,0.06); color: #a0a0a0; border: 1px solid rgba(255,255,255,0.08); }
+    .scope-write { background: rgba(59,130,246,0.1); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
+    .scope-default { background: rgba(255,255,255,0.06); color: #a0a0a0; border: 1px solid rgba(255,255,255,0.08); }
+    .btn-row { display: flex; gap: 0.75rem; margin-top: 0.5rem; }
+    .btn {
+      flex: 1; padding: 0.75rem 1rem; border: none; border-radius: 10px;
+      font-size: 0.95rem; font-weight: 500; font-family: 'Inter', sans-serif;
+      cursor: pointer; text-align: center; text-decoration: none; display: inline-block;
+      transition: all 0.15s ease;
+      outline: none;
+    }
+    .btn:focus-visible { box-shadow: 0 0 0 2px #0a0a0a, 0 0 0 4px #3b82f6; }
     .btn-primary { background: #3b82f6; color: #fff; }
-    .btn-primary:hover { background: #2563eb; }
-    .btn-secondary { background: #2a2a2a; color: #fafafa; border: 1px solid #333338; }
-    .btn-secondary:hover { background: #333338; }
-    .btn-google { display: flex; align-items: center; justify-content: center; gap: 0.5rem; background: #fff; color: #333; border: 1px solid #ddd; border-radius: 8px; padding: 0.75rem; font-size: 0.95rem; font-weight: 500; font-family: 'Inter', sans-serif; text-decoration: none; width: 100%; transition: all 0.2s ease; }
-    .btn-google:hover { background: #f5f5f5; }
+    .btn-primary:hover { background: #2563eb; transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-secondary { background: rgba(255,255,255,0.06); color: #fafafa; border: 1px solid rgba(255,255,255,0.1); }
+    .btn-secondary:hover { background: rgba(255,255,255,0.1); }
+    .btn-google {
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+      background: #fff; color: #333; border: 1px solid #ddd; border-radius: 10px;
+      padding: 0.75rem; font-size: 0.95rem; font-weight: 500; font-family: 'Inter', sans-serif;
+      text-decoration: none; width: 100%; transition: all 0.15s ease; outline: none;
+    }
+    .btn-google:hover { background: #f5f5f5; transform: translateY(-1px); }
+    .btn-google:active { transform: translateY(0); }
+    .btn-google:focus-visible { box-shadow: 0 0 0 2px #0a0a0a, 0 0 0 4px #3b82f6; }
     .error-text { color: #ef4444; text-align: center; }
-    .divider { border-top: 1px solid #333338; margin: 1.5rem 0; }
-    .footer { text-align: center; font-size: 0.8rem; color: #808080; border-top: 1px solid #333338; padding-top: 1rem; margin-top: 1.5rem; }
+    .divider { border-top: 1px solid rgba(255,255,255,0.06); margin: 1.5rem 0; }
+    .footer { text-align: center; font-size: 0.8rem; color: #555; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 1rem; margin-top: 1.5rem; }
   </style>
 `;
 
@@ -699,7 +757,12 @@ function renderConsentPage(params: {
   csrfToken: string;
 }): string {
   const scopes = params.scope ? params.scope.split(/[\s,]+/).filter(Boolean) : ['full access'];
-  const scopeItems = scopes.map((s) => `<li>${escapeHtml(s)}</li>`).join('');
+  const scopeBadges = scopes
+    .map((s) => {
+      const cls = s.endsWith(':write') ? 'scope-write' : s.endsWith(':read') ? 'scope-read' : 'scope-default';
+      return `<span class="scope-badge ${cls}">${escapeHtml(s)}</span>`;
+    })
+    .join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -725,7 +788,7 @@ function renderConsentPage(params: {
     </div>
     <div class="info">
       <div class="label">Permissions requested</div>
-      <ul class="scope-list">${scopeItems}</ul>
+      <div class="scope-badges">${scopeBadges}</div>
     </div>
 
     <form method="POST" action="/v1/auth/oauth/authorize">
