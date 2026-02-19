@@ -106,7 +106,7 @@ Log a significant action for the audit trail.
 
 ---
 
-## REST API — 22 Endpoints
+## REST API — 27 Endpoints
 
 Base URL: `https://epitome.fyi/v1` (hosted) or `http://localhost:3000/v1` (self-hosted)
 
@@ -147,6 +147,67 @@ Base URL: `https://epitome.fyi/v1` (hosted) or `http://localhost:3000/v1` (self-
 ### Agents
 - `GET /v1/agents` — List registered agents with consent status
 - `DELETE /v1/agents/:id` — Revoke agent access
+
+### Billing
+- `GET /v1/billing/usage` — Current tier, limits, and usage counts
+- `GET /v1/billing/subscription` — Stripe subscription details
+- `POST /v1/billing/checkout` — Create Stripe checkout session
+- `POST /v1/billing/portal` — Create Stripe portal session
+- `GET /v1/billing/transactions` — x402 transaction history
+
+---
+
+## Billing & Pricing
+
+### Plans
+
+| Feature | Free | Pro ($5/mo) | Enterprise |
+|---------|------|-------------|------------|
+| Tables | 2 | Unlimited | Custom |
+| Agents | 3 | Unlimited | Custom |
+| Graph Entities | 100 | Unlimited | Custom |
+| Audit Retention | 30 days | 365 days | Custom |
+| API Access | MCP + REST | MCP + REST | MCP + REST |
+| Support | Community | Priority | Dedicated |
+| Payment | — | Stripe | Invoice |
+
+### Billing API Endpoints
+
+- `GET /v1/billing/usage` — Returns current tier (`free`/`pro`/`enterprise`), resource limits, and current usage counts
+- `GET /v1/billing/subscription` — Returns Stripe subscription details (status, current period, cancel date)
+- `POST /v1/billing/checkout` — Creates a Stripe checkout session; returns `{ url }` to redirect user
+- `POST /v1/billing/portal` — Creates a Stripe customer portal session for managing subscription
+- `GET /v1/billing/transactions` — Returns x402 payment transaction history
+
+### Agent Pay-Per-Call (x402)
+
+The x402 protocol enables AI agents to pay for individual MCP tool calls using cryptocurrency, without needing a subscription.
+
+**How it works:**
+
+1. Agent calls an MCP tool (e.g., `store_memory`)
+2. If the agent's user is on the free tier and would exceed limits, Epitome returns HTTP 402
+3. The 402 response includes payment details: price ($0.01 USDC), network (Base), and pay-to address
+4. Agent pays $0.01 USDC on Base network
+5. Agent retries the request with payment proof in the `X-Payment` header
+6. Epitome verifies the on-chain payment
+7. Request is processed with pro-tier access for that call
+
+**Supported networks:**
+- Base Sepolia (testnet) — for development
+- Base (mainnet) — for production
+
+**Payment currency:** USDC (USD Coin)
+**Price:** $0.01 per MCP tool call
+
+### x402 Self-Hosting Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| X402_ENABLED | false | Enable x402 payment support |
+| X402_PAY_TO_ADDRESS | — | Wallet address to receive payments |
+| X402_PRICE_PER_CALL | 0.01 | Price per MCP call in USDC |
+| X402_NETWORK | base-sepolia | Network: `base-sepolia` or `base` |
 
 ---
 
@@ -290,5 +351,6 @@ OpenClaw (local compute) → MCP → Epitome (memory layer)
 - API Reference: https://epitome.fyi/docs/api-reference
 - Self-Hosting: https://epitome.fyi/docs/self-hosting
 - Architecture: https://epitome.fyi/docs/architecture
+- Billing & Agents: https://epitome.fyi/docs/billing
 - GitHub: https://github.com/gunning4it/epitome
 - OpenClaw: https://openclaw.ai

@@ -4,6 +4,7 @@ const headings = [
   { id: 'acceptance', text: 'Acceptance of Terms', level: 2 },
   { id: 'service-description', text: 'Service Description', level: 2 },
   { id: 'accounts', text: 'Accounts', level: 2 },
+  { id: 'billing', text: 'Billing & Subscriptions', level: 2 },
   { id: 'acceptable-use', text: 'Acceptable Use', level: 2 },
   { id: 'intellectual-property', text: 'Intellectual Property', level: 2 },
   { id: 'data-ownership', text: 'Data Ownership', level: 2 },
@@ -61,6 +62,57 @@ export default function TermsOfService() {
         You must provide accurate information and keep your account details
         current. You must not create accounts for the purpose of abusing the
         Service or other users.
+      </p>
+
+      <h2 id="billing">Billing &amp; Subscriptions</h2>
+      <p>
+        Epitome offers multiple ways to access the Service:
+      </p>
+
+      <h3>Free Tier</h3>
+      <p>
+        The free tier is available at no cost and includes limited resources:
+        2 tables, 3 agents, 100 graph entities, and 30-day audit retention.
+        Free tier limits may be adjusted with 30 days' notice.
+      </p>
+
+      <h3>Pro Subscription</h3>
+      <p>
+        The Pro plan costs $5 per month, billed monthly via{' '}
+        <a href="https://stripe.com" target="_blank" rel="noopener noreferrer">Stripe</a>.
+        Subscriptions auto-renew each billing cycle unless cancelled. Payment is
+        processed securely by Stripe — we never see or store your full card
+        number.
+      </p>
+
+      <h3>Cancellation &amp; Downgrades</h3>
+      <p>
+        You may cancel your Pro subscription at any time through the Billing
+        page in the dashboard. Upon cancellation:
+      </p>
+      <ul>
+        <li>Your Pro access continues until the end of the current billing period</li>
+        <li>No partial refunds are issued for unused time</li>
+        <li>Your account reverts to the free tier at the end of the period</li>
+        <li>Existing data is preserved, but creation of new resources may be
+            blocked if your usage exceeds free-tier limits</li>
+      </ul>
+
+      <h3>Agent Pay-Per-Call (x402)</h3>
+      <p>
+        AI agents may pay for individual MCP tool calls using USDC
+        cryptocurrency on the Base network via the x402 protocol (HTTP 402
+        Payment Required). Each payment grants pro-tier access for that
+        specific call. These are non-refundable micro-transactions recorded
+        on the blockchain.
+      </p>
+
+      <h3>Price Changes</h3>
+      <p>
+        We will provide at least 30 days' notice before any price increases
+        take effect. Notice will be provided via email and/or an in-dashboard
+        notification. Continued use of the Service after a price change
+        constitutes acceptance of the new pricing.
       </p>
 
       <h2 id="acceptable-use">Acceptable Use</h2>

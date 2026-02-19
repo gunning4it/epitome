@@ -62,6 +62,20 @@ export default function PrivacyPolicy() {
         </li>
       </ul>
 
+      <h3>Payment Data</h3>
+      <p>
+        If you subscribe to a paid plan, payment processing is handled by{' '}
+        <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer">Stripe</a>.
+        We store your Stripe customer ID and subscription ID to manage your
+        account, but we never receive or store your full credit card number.
+        Stripe processes card details under their own PCI-DSS compliance.
+      </p>
+      <p>
+        For x402 agent payments, we record blockchain transaction hashes (which
+        are public data on the Base network) to verify payments and maintain
+        transaction history.
+      </p>
+
       <h2 id="how-we-use-your-data">How We Use Your Data</h2>
       <p>We use your information to:</p>
       <ul>
@@ -108,6 +122,11 @@ export default function PrivacyPolicy() {
             <td>Fly.io</td>
             <td>Application compute hosting</td>
             <td>Data in transit (TLS 1.3 encrypted)</td>
+          </tr>
+          <tr>
+            <td>Stripe</td>
+            <td>Payment processing for Pro subscriptions</td>
+            <td>Stripe customer ID, subscription status, invoice records (Stripe processes card details under their own PCI-DSS compliance; we never see or store card numbers)</td>
           </tr>
         </tbody>
       </table>

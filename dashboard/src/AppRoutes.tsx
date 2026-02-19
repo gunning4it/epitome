@@ -35,6 +35,7 @@ const DataModel = lazy(() => import('@/pages/docs/DataModel'));
 const Contributing = lazy(() => import('@/pages/docs/Contributing'));
 const Troubleshooting = lazy(() => import('@/pages/docs/Troubleshooting'));
 const Security = lazy(() => import('@/pages/docs/Security'));
+const BillingDocs = lazy(() => import('@/pages/docs/Billing'));
 
 // Legal pages — lazy loaded
 const LegalLayout = lazy(() => import('@/components/legal/LegalLayout'));
@@ -88,6 +89,7 @@ export default function AppRoutes() {
         <Route path="contributing" element={<Contributing />} />
         <Route path="troubleshooting" element={<Troubleshooting />} />
         <Route path="security" element={<Security />} />
+        <Route path="billing" element={<BillingDocs />} />
       </Route>
 
       {/* Legal pages */}

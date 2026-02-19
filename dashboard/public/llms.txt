@@ -41,6 +41,14 @@ Agents connect via Streamable HTTP:
 }
 ```
 
+## Pricing
+
+- **Free**: 2 tables, 3 agents, 100 graph entities, 30-day audit retention
+- **Pro**: $5/month — unlimited everything, 365-day audit retention
+- **Agent Pay-Per-Call**: $0.01/call via x402 (USDC on Base) — no subscription needed
+
+Agents on the free tier receive HTTP 402 responses with x402 payment details. Pay with USDC to get pro-tier access for that call.
+
 ## Better Together: OpenClaw + Epitome
 
 You know the buddy-cop movie where one is all muscle and the other is all brains? That's OpenClaw and Epitome.

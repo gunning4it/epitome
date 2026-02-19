@@ -56,8 +56,8 @@ export default function CcpaPolicy() {
           </tr>
           <tr>
             <td>D. Commercial Information</td>
-            <td>N/A — Epitome is free</td>
-            <td>No</td>
+            <td>Subscription tier, billing history, x402 transaction hashes</td>
+            <td>Yes</td>
           </tr>
           <tr>
             <td>F. Internet or Network Activity</td>
@@ -129,6 +129,11 @@ export default function CcpaPolicy() {
             <td>Fly.io</td>
             <td>Application hosting</td>
             <td>Data in transit (TLS encrypted)</td>
+          </tr>
+          <tr>
+            <td>Stripe</td>
+            <td>Payment processing</td>
+            <td>Customer ID, subscription status, transaction records</td>
           </tr>
         </tbody>
       </table>

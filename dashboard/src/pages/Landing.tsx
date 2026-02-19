@@ -4,6 +4,7 @@ import FeaturesSection from '@/components/landing/FeaturesSection';
 import HowItWorksSection from '@/components/landing/HowItWorksSection';
 import BetterTogetherSection from '@/components/landing/BetterTogetherSection';
 import OpenSourceSection from '@/components/landing/OpenSourceSection';
+import PricingSection from '@/components/landing/PricingSection';
 import Footer from '@/components/landing/Footer';
 import SEO, { LandingJsonLd } from '@/components/SEO';
 
@@ -22,6 +23,7 @@ export default function Landing() {
       <HowItWorksSection />
       <BetterTogetherSection />
       <OpenSourceSection />
+      <PricingSection />
       <Footer />
     </div>
   );

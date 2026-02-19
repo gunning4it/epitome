@@ -7,6 +7,7 @@ import {
   Layers,
   Database,
   Shield,
+  CreditCard,
   GitPullRequest,
   HelpCircle,
 } from 'lucide-react';
@@ -62,6 +63,13 @@ const sections = [
     icon: Shield,
     path: '/docs/security',
     color: 'text-red-400',
+  },
+  {
+    title: 'Billing & Agents',
+    description: 'Plans, pricing, and x402 agent payments',
+    icon: CreditCard,
+    path: '/docs/billing',
+    color: 'text-amber-400',
   },
   {
     title: 'Contributing',
