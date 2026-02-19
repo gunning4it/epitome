@@ -35,6 +35,7 @@ import {
   OAuthProfile,
 } from '@/services/auth.service';
 import { generateOAuthState, decodeOAuthState } from '@/utils/crypto';
+import { normalizeDashboardRedirect } from '@/utils/auth-redirect';
 import { requireAuth } from '@/middleware/auth';
 import { db } from '@/db/client';
 import { users } from '@/db/schema';
@@ -211,7 +212,7 @@ auth.get('/callback', zValidator('query', callbackQuerySchema), async (c) => {
 
   // Redirect after login
   const dashboardUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
-  const redirectTarget = stateData.redirectUri || '/agents';
+  const redirectTarget = normalizeDashboardRedirect(stateData.redirectUri);
 
   if (isNewUser) {
     return c.redirect(`${dashboardUrl}/agents`);
