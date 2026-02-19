@@ -255,6 +255,32 @@ CREATE INDEX IF NOT EXISTS idx_pending_vectors_sched
 CREATE INDEX IF NOT EXISTS idx_pending_vectors_user
   ON public.pending_vectors(user_id, created_at DESC);
 
+-- -----------------------------------------------------
+-- Table: public.idempotency_ledger
+-- -----------------------------------------------------
+-- Central idempotency ledger for write tool CAS reservation flow.
+-- Prevents duplicate execution when ChatGPT (or any client) retries tool calls.
+CREATE TABLE IF NOT EXISTS public.idempotency_ledger (
+  user_id         UUID NOT NULL,
+  tool_name       VARCHAR(64) NOT NULL,
+  idempotency_key UUID NOT NULL,
+  request_hash    VARCHAR(64) NOT NULL,
+  status          VARCHAR(16) NOT NULL DEFAULT 'reserved',
+  owner_token     UUID NOT NULL,
+  response        JSONB,
+  reserved_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at    TIMESTAMPTZ,
+  PRIMARY KEY (user_id, tool_name, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_cleanup
+  ON public.idempotency_ledger (status, reserved_at)
+  WHERE status = 'reserved';
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_completed_cleanup
+  ON public.idempotency_ledger (status, completed_at)
+  WHERE status = 'completed';
+
 -- =====================================================
 -- ROW LEVEL SECURITY (BLOCK SUPABASE DATA API ACCESS)
 -- =====================================================
@@ -270,6 +296,7 @@ ALTER TABLE public.agent_registry ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.system_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.enrichment_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pending_vectors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.idempotency_ledger ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================
 -- REVOKE DATA API GRANTS

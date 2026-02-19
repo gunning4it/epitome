@@ -4,6 +4,7 @@ import { requireConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
 import { createWriteId, ingestMemoryText } from '@/services/writeIngestion.service';
 import { linkRelatedRecords } from '@/services/threadLinking';
+import { executeWithIdempotency, IdempotencyHashMismatchError, IdempotencyTimeoutError } from '@/services/idempotency.service';
 import { logger } from '@/utils/logger';
 import type { ToolContext, ToolResult } from './types.js';
 import { toolSuccess, toolFailure, ToolErrorCode } from './types.js';
@@ -12,6 +13,7 @@ interface SaveMemoryArgs {
   collection: string;
   text: string;
   metadata?: Record<string, any>;
+  idempotencyKey?: string;
 }
 
 export async function saveMemory(
@@ -33,39 +35,39 @@ export async function saveMemory(
   }
 
   try {
-    // Audit log
-    await logAuditEntry(userId, {
-      agentId,
-      action: 'mcp_save_memory',
-      resource,
-      details: {
-        textLength: args.text.length,
-        metadata: args.metadata,
-      },
-    });
-
-    const writeId = createWriteId();
-    const ingested = await ingestMemoryText({
-      userId,
-      collection: args.collection,
-      text: args.text,
-      metadata: args.metadata || {},
-      changedBy: agentId,
-      origin: 'ai_stated',
-      writeId,
-      tier: ctx.tier,
-    });
-
-    // Trigger async thread linking (non-blocking)
-    if (ingested.vectorId) {
-      linkRelatedRecords(userId, ingested.vectorId, 'vectors').catch((error: unknown) => {
-        logger.error('save_memory thread linking failed', { error: String(error) });
+    const executeFn = async () => {
+      // Audit log
+      await logAuditEntry(userId, {
+        agentId,
+        action: 'mcp_save_memory',
+        resource,
+        details: {
+          textLength: args.text.length,
+          metadata: args.metadata,
+        },
       });
-    }
 
-    return toolSuccess(
-      {
-        success: true,
+      const writeId = createWriteId();
+      const ingested = await ingestMemoryText({
+        userId,
+        collection: args.collection,
+        text: args.text,
+        metadata: args.metadata || {},
+        changedBy: agentId,
+        origin: 'ai_stated',
+        writeId,
+        tier: ctx.tier,
+      });
+
+      // Trigger async thread linking (non-blocking)
+      if (ingested.vectorId) {
+        linkRelatedRecords(userId, ingested.vectorId, 'vectors').catch((error: unknown) => {
+          logger.error('save_memory thread linking failed', { error: String(error) });
+        });
+      }
+
+      return {
+        success: true as const,
         collection: args.collection,
         vectorId: ingested.vectorId,
         pendingVectorId: ingested.pendingVectorId,
@@ -74,10 +76,32 @@ export async function saveMemory(
         writeStatus: ingested.writeStatus,
         jobId: ingested.jobId,
         message: 'Memory saved successfully',
-      },
-      'Memory saved successfully',
-    );
+      };
+    };
+
+    let data: Awaited<ReturnType<typeof executeFn>>;
+
+    if (args.idempotencyKey) {
+      const { result } = await executeWithIdempotency(
+        userId,
+        'save_memory',
+        args.idempotencyKey,
+        args,
+        executeFn,
+      );
+      data = result;
+    } else {
+      data = await executeFn();
+    }
+
+    return toolSuccess(data, 'Memory saved successfully');
   } catch (err) {
+    if (err instanceof IdempotencyHashMismatchError) {
+      return toolFailure(ToolErrorCode.INVALID_ARGS, err.message, false);
+    }
+    if (err instanceof IdempotencyTimeoutError) {
+      return toolFailure(ToolErrorCode.INTERNAL_ERROR, err.message, true);
+    }
     const msg = err instanceof Error ? err.message : String(err);
     logger.error('saveMemory service error', { error: msg, userId });
     return toolFailure(ToolErrorCode.INTERNAL_ERROR, msg, true);
