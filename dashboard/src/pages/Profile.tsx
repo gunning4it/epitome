@@ -199,30 +199,57 @@ export default function Profile() {
           </CardHeader>
           <CardContent>
             {(() => {
-              const familyMembers: FamilyMember[] = Array.isArray(profileData.family)
-                ? (profileData.family as FamilyMember[])
-                : profileData.family && typeof profileData.family === 'object'
-                  ? Object.entries(profileData.family as Record<string, FamilyMember>).map(
-                      ([relation, member]) => ({
-                        ...member,
-                        relation,
-                      })
-                    )
-                  : [];
-              return familyMembers.length > 0 ? (
-                <div className="space-y-3">
-                  {familyMembers.map((member, idx: number) => (
-                    <div key={idx} className="flex items-center justify-between bg-muted rounded-lg p-3">
-                      <div>
-                        <div className="font-medium text-foreground">{member.name}</div>
-                        <div className="text-sm text-muted-foreground">{member.relation}</div>
-                      </div>
-                      {member.birthday && (
-                        <div className="text-sm text-muted-foreground">{member.birthday}</div>
-                      )}
+              const family = profileData.family;
+              const familyMembers: FamilyMember[] = [];
+              const familyContext: Array<{ key: string; value: unknown }> = [];
+
+              if (Array.isArray(family)) {
+                familyMembers.push(...(family as FamilyMember[]));
+              } else if (family && typeof family === 'object') {
+                for (const [key, value] of Object.entries(family as Record<string, unknown>)) {
+                  const isMember =
+                    value && typeof value === 'object' && !Array.isArray(value) &&
+                    ('name' in (value as Record<string, unknown>) || 'birthday' in (value as Record<string, unknown>));
+                  if (isMember) {
+                    familyMembers.push({ ...(value as FamilyMember), relation: key });
+                  } else {
+                    familyContext.push({ key, value });
+                  }
+                }
+              }
+
+              return familyMembers.length > 0 || familyContext.length > 0 ? (
+                <>
+                  {familyMembers.length > 0 && (
+                    <div className="space-y-3">
+                      {familyMembers.map((member, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between bg-muted rounded-lg p-3">
+                          <div>
+                            <div className="font-medium text-foreground">{member.name}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {member.relation?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                            </div>
+                          </div>
+                          {member.birthday && (
+                            <div className="text-sm text-muted-foreground">{member.birthday}</div>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                  {familyContext.length > 0 && (
+                    <div className="mt-3 space-y-1.5">
+                      {familyContext.map(({ key, value }) => (
+                        <div key={key} className="text-sm text-muted-foreground">
+                          <span className="font-medium text-foreground">
+                            {key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}:
+                          </span>{' '}
+                          {String(value)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : (
                 <p className="text-muted-foreground text-sm">No family members added</p>
               );
