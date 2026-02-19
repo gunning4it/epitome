@@ -60,7 +60,7 @@ Open [localhost:5173](http://localhost:5173) and sign in with Google or GitHub O
 
 ## Connect an AI Agent
 
-Get your MCP token from **Settings → API Keys** in the dashboard (hosted or self-hosted).
+Get your API key from **Settings → API Keys** in the dashboard (hosted or self-hosted).
 
 ### Claude Desktop
 
@@ -70,7 +70,10 @@ Add to your `claude_desktop_config.json`:
 {
   "mcpServers": {
     "epitome": {
-      "url": "https://epitome.fyi/mcp/YOUR_MCP_TOKEN"
+      "url": "https://epitome.fyi/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY"
+      }
     }
   }
 }
@@ -79,12 +82,12 @@ Add to your `claude_desktop_config.json`:
 ### Claude Code
 
 ```bash
-claude mcp add epitome --transport streamable-http https://epitome.fyi/mcp/YOUR_MCP_TOKEN
+claude mcp add --transport http --header "Authorization: Bearer YOUR_API_KEY" epitome https://epitome.fyi/mcp
 ```
 
 ### Self-Hosted
 
-Replace `https://epitome.fyi` with `http://localhost:3000` (or your deployment URL).
+For self-hosted, replace `https://epitome.fyi` with `http://localhost:3000`.
 
 Epitome exposes **9 MCP tools** — profile read/write, memory search, table CRUD, knowledge graph queries, and more. See the [full tool reference](https://epitome.fyi/docs/mcp-tools).
 
