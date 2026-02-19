@@ -19,7 +19,7 @@ import { listTables } from '@/services/table.service';
 import { listCollections } from '@/services/vector.service';
 import { withUserSchema } from '@/db/client';
 import type { ToolContext, ToolResult } from './types.js';
-import { toolSuccess, toolFailure, ToolErrorCode } from './types.js';
+import { toolSuccess } from './types.js';
 
 export interface GetUserContextArgs {
   topic?: string;
