@@ -10,6 +10,7 @@
  * - RFC 7591 (Dynamic Client Registration)
  * - RFC 6749 (OAuth 2.0 Authorization Code)
  * - RFC 7636 (PKCE)
+ * - RFC 8707 (Resource Indicators)
  *
  * Key design decision: Reuses epi_... API keys as OAuth access tokens.
  * The existing authResolver middleware validates them automatically.
@@ -30,6 +31,40 @@ import {
 } from '@/utils/crypto';
 import { createApiKeyForUser } from '@/services/auth.service';
 import { logger } from '@/utils/logger';
+
+// ─── APP_ENV-scoped resource validation (RFC 8707) ──────────────────
+
+const ALLOWED_RESOURCES: Record<string, Set<string>> = {
+  production:  new Set(['https://api.epitome.fyi']),
+  staging:     new Set(['https://epitome-staging-api.fly.dev']),
+  development: new Set(['http://localhost:3000']),
+};
+
+function getAppEnv(): string {
+  // In test mode, default to 'development' so tests don't need APP_ENV set
+  if (process.env.NODE_ENV === 'test') {
+    return process.env.APP_ENV || 'development';
+  }
+  const env = process.env.APP_ENV;
+  if (!env || !ALLOWED_RESOURCES[env]) {
+    throw new Error(`FATAL: APP_ENV must be one of: ${Object.keys(ALLOWED_RESOURCES).join(', ')}. Got: '${env}'`);
+  }
+  return env;
+}
+
+/**
+ * Validate a resource parameter against the APP_ENV-scoped allowlist.
+ * Returns null if valid (or absent), or an error description string if invalid.
+ */
+export function validateResource(resource: string | undefined): string | null {
+  if (!resource) return null; // resource param is optional
+  const env = getAppEnv();
+  const allowed = ALLOWED_RESOURCES[env]!;
+  if (!allowed.has(resource)) {
+    return `Invalid resource parameter for environment '${env}'`;
+  }
+  return null;
+}
 
 function getBaseUrl(): string {
   return process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
@@ -194,6 +229,7 @@ export async function oauthAuthorize(c: Context) {
   const responseType = c.req.query('response_type');
   const scope = c.req.query('scope') || '';
   const state = c.req.query('state') || '';
+  const resource = c.req.query('resource');
 
   // Validate required params
   if (!clientId || !redirectUri || !codeChallenge || !responseType) {
@@ -206,6 +242,12 @@ export async function oauthAuthorize(c: Context) {
 
   if (codeChallengeMethod !== 'S256') {
     return c.html(renderErrorPage('Unsupported code_challenge_method. Only "S256" is supported.'), 400);
+  }
+
+  // RFC 8707: Validate resource parameter if provided
+  const resourceError = validateResource(resource);
+  if (resourceError) {
+    return c.html(renderErrorPage(resourceError), 400);
   }
 
   // Look up client
@@ -274,6 +316,7 @@ export async function oauthAuthorize(c: Context) {
       codeChallenge,
       codeChallengeMethod,
       state,
+      resource: resource || '',
       csrfToken,
     }),
     200
@@ -296,6 +339,7 @@ export async function oauthAuthorizeConsent(c: Context) {
   const codeChallengeMethod = body['code_challenge_method'] as string || 'S256';
   const state = body['state'] as string || '';
   const scope = body['scope'] as string || '';
+  const resource = body['resource'] as string || '';
 
   // C-3 SECURITY FIX: Verify CSRF token (double-submit cookie pattern)
   const csrfFromForm = body['csrf_token'] as string;
@@ -351,6 +395,7 @@ export async function oauthAuthorizeConsent(c: Context) {
     codeChallenge,
     codeChallengeMethod,
     state,
+    resource: resource || null,
     expiresAt,
   });
 
@@ -376,6 +421,7 @@ export async function oauthToken(c: Context) {
   let redirectUri: string | undefined;
   let codeVerifier: string | undefined;
   let clientId: string | undefined;
+  let resource: string | undefined;
 
   const contentType = c.req.header('Content-Type') || '';
 
@@ -386,6 +432,7 @@ export async function oauthToken(c: Context) {
     redirectUri = body['redirect_uri'] as string;
     codeVerifier = body['code_verifier'] as string;
     clientId = body['client_id'] as string;
+    resource = body['resource'] as string;
   } else {
     try {
       const body = await c.req.json();
@@ -394,9 +441,16 @@ export async function oauthToken(c: Context) {
       redirectUri = body.redirect_uri;
       codeVerifier = body.code_verifier;
       clientId = body.client_id;
+      resource = body.resource;
     } catch {
       return c.json({ error: 'invalid_request', error_description: 'Invalid request body' }, 400);
     }
+  }
+
+  // RFC 8707: Validate resource parameter if provided
+  const resourceError = validateResource(resource);
+  if (resourceError) {
+    return c.json({ error: 'invalid_request', error_description: resourceError }, 400);
   }
 
   if (grantType !== 'authorization_code') {
@@ -443,6 +497,11 @@ export async function oauthToken(c: Context) {
     return c.json({ error: 'invalid_grant', error_description: 'client_id does not match' }, 400);
   }
 
+  // RFC 8707: Validate resource matches what was stored with the auth code
+  if (resource && authCode.resource && resource !== authCode.resource) {
+    return c.json({ error: 'invalid_grant', error_description: 'resource does not match the authorization request' }, 400);
+  }
+
   // PKCE S256 verification
   if (!verifyPkceS256(codeVerifier, authCode.codeChallenge)) {
     return c.json({ error: 'invalid_grant', error_description: 'PKCE verification failed' }, 400);
@@ -480,6 +539,7 @@ export async function oauthToken(c: Context) {
     return c.json({
       access_token: apiKey.key,
       token_type: 'Bearer',
+      scope: authCode.scope || '',
       expires_in: 31536000, // 1 year in seconds
     });
   } catch (error) {
@@ -557,6 +617,7 @@ function renderConsentPage(params: {
   codeChallenge: string;
   codeChallengeMethod: string;
   state: string;
+  resource: string;
   csrfToken: string;
 }): string {
   const scopes = params.scope ? params.scope.split(/[\s,]+/).filter(Boolean) : ['full access'];
@@ -596,6 +657,7 @@ function renderConsentPage(params: {
       <input type="hidden" name="code_challenge_method" value="${escapeAttr(params.codeChallengeMethod)}">
       <input type="hidden" name="state" value="${escapeAttr(params.state)}">
       <input type="hidden" name="scope" value="${escapeAttr(params.scope)}">
+      <input type="hidden" name="resource" value="${escapeAttr(params.resource)}">
 
       <div class="btn-row">
         <button type="submit" name="action" value="deny" class="btn btn-secondary">Deny</button>

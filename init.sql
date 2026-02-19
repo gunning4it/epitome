@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS public.oauth_authorization_codes (
   code_challenge        VARCHAR(128) NOT NULL,
   code_challenge_method VARCHAR(10) NOT NULL DEFAULT 'S256',
   state                 VARCHAR(500),
+  resource              VARCHAR(2048),
   expires_at            TIMESTAMPTZ NOT NULL,
   used_at               TIMESTAMPTZ,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()

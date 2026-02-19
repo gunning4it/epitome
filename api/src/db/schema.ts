@@ -211,6 +211,7 @@ export const oauthAuthorizationCodes = pgTable(
     codeChallenge: varchar('code_challenge', { length: 128 }).notNull(),
     codeChallengeMethod: varchar('code_challenge_method', { length: 10 }).notNull().default('S256'),
     state: varchar('state', { length: 500 }),
+    resource: varchar('resource', { length: 2048 }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     usedAt: timestamp('used_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

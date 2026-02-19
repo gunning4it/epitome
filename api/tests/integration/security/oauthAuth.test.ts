@@ -76,10 +76,15 @@ async function ensureOAuthTables() {
       code_challenge VARCHAR(128) NOT NULL,
       code_challenge_method VARCHAR(10) NOT NULL DEFAULT 'S256',
       state VARCHAR(500),
+      resource VARCHAR(2048),
       expires_at TIMESTAMPTZ NOT NULL,
       used_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `));
+  // Add resource column if it doesn't exist (for existing tables)
+  await db.execute(sql.raw(`
+    ALTER TABLE public.oauth_authorization_codes ADD COLUMN IF NOT EXISTS resource VARCHAR(2048)
   `));
 }
 
@@ -568,6 +573,213 @@ describe('OAuth & Auth Security Fixes', () => {
       await deleteAuthCodes(oauthClientId);
       await deleteSession(tokenHash);
       await deleteOAuthClient(oauthClientId);
+    });
+  });
+
+  // ─── ChatGPT Redirect URI Support ───────────────────────────────────
+
+  describe('ChatGPT redirect URI support', () => {
+    test('accepts ChatGPT redirect URI', async () => {
+      const response = await app.request('/v1/auth/oauth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_name: 'ChatGPT Test',
+          redirect_uris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const body = await response.json() as any;
+      expect(body.client_id).toBeDefined();
+      expect(body.redirect_uris).toContain('https://chatgpt.com/connector_platform_oauth_redirect');
+
+      // Cleanup
+      await deleteOAuthClient(body.client_id);
+    });
+
+    test('accepts OpenAI platform redirect URI', async () => {
+      const response = await app.request('/v1/auth/oauth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_name: 'OpenAI Platform Test',
+          redirect_uris: ['https://platform.openai.com/apps-manage/oauth'],
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const body = await response.json() as any;
+      expect(body.client_id).toBeDefined();
+      expect(body.redirect_uris).toContain('https://platform.openai.com/apps-manage/oauth');
+
+      // Cleanup
+      await deleteOAuthClient(body.client_id);
+    });
+  });
+
+  // ─── RFC 8707: Resource Parameter Validation ────────────────────────
+
+  describe('RFC 8707: Resource parameter validation', () => {
+    let oauthClientId: string;
+
+    beforeAll(async () => {
+      oauthClientId = crypto.randomBytes(16).toString('hex');
+      await insertOAuthClient(oauthClientId, 'Test Resource App', ['https://localhost:3000/callback']);
+    });
+
+    afterAll(async () => {
+      await deleteAuthCodes(oauthClientId);
+      await deleteOAuthClient(oauthClientId);
+    });
+
+    test('rejects unknown resource parameter at authorization endpoint', async () => {
+      const codeChallenge = crypto.createHash('sha256').update('test_verifier').digest('base64url');
+      const url = `/v1/auth/oauth/authorize?client_id=${oauthClientId}&redirect_uri=${encodeURIComponent('https://localhost:3000/callback')}&code_challenge=${codeChallenge}&code_challenge_method=S256&response_type=code&scope=profile:read&resource=${encodeURIComponent('https://evil.example.com')}`;
+
+      const response = await app.request(url, { method: 'GET' });
+
+      expect(response.status).toBe(400);
+      const html = await response.text();
+      expect(html).toContain('Invalid resource parameter');
+    });
+
+    test('rejects unknown resource parameter at token endpoint', async () => {
+      const formBody = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: 'fake_code',
+        code_verifier: 'a'.repeat(43), // minimum length
+        resource: 'https://evil.example.com',
+      });
+
+      const response = await app.request('/v1/auth/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formBody.toString(),
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json() as any;
+      expect(body.error).toBe('invalid_request');
+      expect(body.error_description).toContain('Invalid resource parameter');
+    });
+
+    test('accepts valid resource parameter (development)', async () => {
+      // In test mode, APP_ENV defaults to 'development', so http://localhost:3000 is allowed
+      const codeChallenge = crypto.createHash('sha256').update('test_verifier').digest('base64url');
+
+      // Create a session for the user
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = hashSessionToken(sessionToken);
+      await insertSession(testUser.userId, tokenHash, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+
+      const headers = new Headers();
+      headers.set('Cookie', `epitome_session=${sessionToken}`);
+
+      const url = `/v1/auth/oauth/authorize?client_id=${oauthClientId}&redirect_uri=${encodeURIComponent('https://localhost:3000/callback')}&code_challenge=${codeChallenge}&code_challenge_method=S256&response_type=code&scope=profile:read&resource=${encodeURIComponent('http://localhost:3000')}`;
+
+      const response = await app.request(url, { method: 'GET', headers });
+
+      // Should render consent page (200), not error (400)
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain('Authorize Access');
+
+      // Cleanup
+      await deleteSession(tokenHash);
+    });
+
+    test('rejects token request with mismatched resource', async () => {
+      // Store an auth code with resource = 'http://localhost:3000'
+      const rawCode = crypto.randomBytes(64).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+      const codeVerifier = crypto.randomBytes(32).toString('hex');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+      await db.execute(sql.raw(`
+        INSERT INTO public.oauth_authorization_codes (code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, state, resource, expires_at)
+        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback', 'profile:read', '${codeChallenge}', 'S256', '', 'http://localhost:3000', '${new Date(Date.now() + 60 * 1000).toISOString()}')
+      `));
+
+      // Try to exchange with a different (but valid-for-env) resource
+      // Since dev only has one resource, we need to use an invalid one — but that gets caught earlier.
+      // Instead, store one resource in the auth code and send a different one at token time.
+      // We'll temporarily set a different resource in the auth code record.
+      await db.execute(sql.raw(`
+        UPDATE public.oauth_authorization_codes SET resource = 'https://other-valid.example.com' WHERE code = '${codeHash}'
+      `));
+
+      const formBody = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: rawCode,
+        code_verifier: codeVerifier,
+        redirect_uri: 'https://localhost:3000/callback',
+        client_id: oauthClientId,
+        resource: 'http://localhost:3000',
+      });
+
+      const response = await app.request('/v1/auth/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formBody.toString(),
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json() as any;
+      expect(body.error).toBe('invalid_grant');
+      expect(body.error_description).toContain('resource does not match');
+
+      // Cleanup
+      await db.execute(sql.raw(`DELETE FROM public.oauth_authorization_codes WHERE code = '${codeHash}'`));
+    });
+  });
+
+  // ─── Token Response Scope ───────────────────────────────────────────
+
+  describe('Token response includes scope', () => {
+    let oauthClientId: string;
+
+    beforeAll(async () => {
+      oauthClientId = crypto.randomBytes(16).toString('hex');
+      await insertOAuthClient(oauthClientId, 'Test Scope App', ['https://localhost:3000/callback']);
+    });
+
+    afterAll(async () => {
+      await deleteAuthCodes(oauthClientId);
+      await deleteOAuthClient(oauthClientId);
+    });
+
+    test('includes scope in token response', async () => {
+      const rawCode = crypto.randomBytes(64).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+      const codeVerifier = crypto.randomBytes(32).toString('hex');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+      await db.execute(sql.raw(`
+        INSERT INTO public.oauth_authorization_codes (code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, state, expires_at)
+        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback', 'profile:read tables:read', '${codeChallenge}', 'S256', '', '${new Date(Date.now() + 60 * 1000).toISOString()}')
+      `));
+
+      const formBody = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: rawCode,
+        code_verifier: codeVerifier,
+        redirect_uri: 'https://localhost:3000/callback',
+        client_id: oauthClientId,
+      });
+
+      const response = await app.request('/v1/auth/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formBody.toString(),
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as any;
+      expect(body.access_token).toBeDefined();
+      expect(body.token_type).toBe('Bearer');
+      expect(body.scope).toBe('profile:read tables:read');
+      expect(body.expires_in).toBeDefined();
     });
   });
 });
