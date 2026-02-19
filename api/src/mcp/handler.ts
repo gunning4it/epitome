@@ -17,6 +17,7 @@ import { getToolDefinitions, executeTool, McpContext } from './server.js';
 import { createMcpProtocolServer } from './protocol.js';
 import { logger } from '@/utils/logger';
 import { recordApiCall, getEffectiveTier } from '@/services/metering.service';
+import { x402Service } from '@/services/x402.service';
 import type { HonoEnv } from '@/types/hono';
 
 /**
@@ -61,61 +62,6 @@ function buildMcpContext(c: Context): McpContext {
   return { userId, agentId, tier };
 }
 
-/**
- * Initialize x402 payment middleware (lazy, once per process).
- *
- * Creates the resource server, explicitly awaits initialization (to
- * catch RouteConfigurationError that @x402/hono otherwise fires as an
- * unhandled rejection), and returns the ready-to-use middleware.
- *
- * Returns null when X402_ENABLED is not 'true' or initialization fails.
- */
-let x402MiddlewareInstance: ((c: Context, next: () => Promise<void>) => Promise<void | Response>) | null = null;
-let x402InitAttempted = false;
-
-async function initX402Middleware() {
-  if (!process.env.X402_PAY_TO_ADDRESS) {
-    logger.warn('x402: X402_PAY_TO_ADDRESS not set, x402 payments disabled');
-    return null;
-  }
-  try {
-    const { x402ResourceServer, x402HTTPResourceServer, HTTPFacilitatorClient } = await import('@x402/core/server');
-    const { registerExactEvmScheme } = await import('@x402/evm/exact/server');
-    const { paymentMiddlewareFromHTTPServer } = await import('@x402/hono');
-
-    const facilitatorClient = new HTTPFacilitatorClient({
-      url: process.env.X402_FACILITATOR_URL || 'https://x402.org/facilitator',
-    });
-    const resourceServer = new x402ResourceServer(facilitatorClient);
-    registerExactEvmScheme(resourceServer);
-
-    const network = (process.env.X402_NETWORK || 'eip155:84532') as `${string}:${string}`;
-    const routes = {
-      '/': {
-        accepts: [{
-          scheme: 'exact' as const,
-          price: process.env.X402_PRICE_PER_CALL || '$0.01',
-          network,
-          payTo: process.env.X402_PAY_TO_ADDRESS!,
-        }],
-        description: 'Epitome MCP tool call',
-        mimeType: 'application/json',
-      },
-    };
-
-    const httpServer = new x402HTTPResourceServer(resourceServer, routes);
-
-    // Explicitly await initialization so RouteConfigurationError is
-    // caught here instead of becoming an unhandled promise rejection.
-    await httpServer.initialize();
-
-    // syncFacilitatorOnStart=false — already initialized above
-    return paymentMiddlewareFromHTTPServer(httpServer, undefined, undefined, false);
-  } catch (err) {
-    logger.error('x402: Failed to initialize — payments disabled', { error: String(err) });
-    return null;
-  }
-}
 
 /**
  * Zod schema for x402 PAYMENT-RESPONSE header (base64-encoded JSON).
@@ -159,7 +105,7 @@ export function createMcpRoutes(): Hono<HonoEnv> {
   // Applies only to free-tier agent requests when X402_ENABLED=true.
   // Pro/enterprise users and session-authed humans skip x402.
   app.use('*', async (c, next) => {
-    if (process.env.X402_ENABLED !== 'true') return next();
+    if (!x402Service.isEnabled()) return next();
 
     const tier = c.get('tier') || 'free';
     const authType = c.get('authType');
@@ -169,12 +115,13 @@ export function createMcpRoutes(): Hono<HonoEnv> {
       return next();
     }
 
-    // Lazy-init x402 middleware
-    if (!x402InitAttempted) {
-      x402InitAttempted = true;
-      x402MiddlewareInstance = await initX402Middleware();
+    // Lazy-init on first free-tier request
+    if (!x402Service.getMiddleware()) {
+      await x402Service.initialize();
     }
-    if (!x402MiddlewareInstance) {
+
+    const mw = x402Service.getMiddleware();
+    if (!mw) {
       // Fail closed: free-tier users cannot bypass payment when x402 middleware is unavailable
       return c.json(
         { jsonrpc: '2.0', error: { code: -32000, message: 'Payment service temporarily unavailable' }, id: null },
@@ -186,7 +133,7 @@ export function createMcpRoutes(): Hono<HonoEnv> {
       // Wrap: only set x402Paid if request actually included a payment header
       // (paymentMiddleware calls next() both for "no-payment-required" AND
       // "payment-verified" — we must distinguish between the two)
-      await x402MiddlewareInstance(c, async () => {
+      await mw(c, async () => {
         const paymentHeader = c.req.header('payment-signature') || c.req.header('x-payment');
         if (paymentHeader) {
           c.set('x402Paid', true);

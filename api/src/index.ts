@@ -41,6 +41,7 @@ import { startMemoryDecayScheduler, stopMemoryDecayScheduler } from '@/services/
 import { TierLimitError } from '@/errors/tierLimit';
 import { startMeteringFlush, stopMeteringFlush } from '@/services/metering.service';
 import { logger } from '@/utils/logger';
+import { x402Service } from '@/services/x402.service';
 import type { HonoEnv } from '@/types/hono';
 
 // Initialize Hono app
@@ -62,6 +63,7 @@ app.get('/health', (c) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
+    x402: x402Service.getStatus(),
   });
 });
 
