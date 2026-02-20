@@ -56,6 +56,7 @@ function isAllowedRedirect(url: string): boolean {
       'epitome.fyi',
       'www.epitome.fyi',
       ...(process.env.CORS_ORIGIN ? [new URL(process.env.CORS_ORIGIN).hostname] : []),
+      ...(process.env.BASE_URL ? [new URL(process.env.BASE_URL).hostname] : []),
     ]);
     return ALLOWED_HOSTS.has(parsed.hostname);
   } catch {
