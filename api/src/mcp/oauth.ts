@@ -20,7 +20,8 @@ import crypto from 'crypto';
 import { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { getCookie, setCookie } from 'hono/cookie';
-import { db } from '@/db/client';
+import { db, withUserSchema } from '@/db/client';
+import { logAuditEntry } from '@/services/audit.service';
 import { eq, and, isNull, gt } from 'drizzle-orm';
 import { oauthClients, oauthAuthorizationCodes, users, sessions } from '@/db/schema';
 import {
@@ -630,6 +631,10 @@ export async function oauthToken(c: Context) {
       365 // 1 year expiry
     );
 
+    // Sync consent rules to match the scopes approved on the consent form.
+    // Fail-closed: if consent sync fails, don't issue the token.
+    await syncConsentFromScopes(authCode.userId, agentId, authCode.scope || '');
+
     return c.json({
       access_token: apiKey.key,
       token_type: 'Bearer',
@@ -842,6 +847,86 @@ export function permFieldsToScopeString(permFields: Record<string, string>): str
     }
   }
   return scopes.join(' ');
+}
+
+/**
+ * Sync consent rules to match OAuth-approved scopes.
+ *
+ * Full replacement model: the consent form always presents all 5 resources,
+ * so each OAuth authorization is a complete statement of intent. This function
+ * upserts or revokes the 5 CONSENT_RESOURCES to match the approved scopes.
+ *
+ * Granular dashboard-configured rules (e.g., tables/meals) are unaffected —
+ * the hierarchical most-specific-rule-wins system handles precedence.
+ *
+ * Runs atomically in a single withUserSchema() transaction.
+ */
+export async function syncConsentFromScopes(
+  userId: string,
+  agentId: string,
+  scopeString: string
+): Promise<void> {
+  const scopes = new Set(scopeString.split(/\s+/).filter(Boolean));
+
+  // Determine desired permission for each resource
+  const desired: Array<{ resource: string; permission: 'read' | 'write' | null }> =
+    CONSENT_RESOURCES.map((r) => {
+      const hasWrite = r.writeScope ? scopes.has(r.writeScope) : false;
+      const hasRead = scopes.has(r.readScope);
+      if (hasWrite) return { resource: r.key, permission: 'write' as const };
+      if (hasRead) return { resource: r.key, permission: 'read' as const };
+      return { resource: r.key, permission: null }; // revoke
+    });
+
+  // Atomic: snapshot existing + apply changes in one transaction
+  const diff = await withUserSchema(userId, async (tx) => {
+    // Snapshot existing broad consent rules for this agent
+    const existing = await tx.unsafe<Array<{ resource: string; permission: string }>>(
+      `SELECT resource, permission FROM consent_rules
+       WHERE agent_id = $1 AND revoked_at IS NULL
+         AND resource = ANY($2)`,
+      [agentId, desired.map((d) => d.resource)]
+    );
+    const before = Object.fromEntries(existing.map((r) => [r.resource, r.permission]));
+
+    // Apply: upsert grants, revoke denials
+    for (const { resource, permission } of desired) {
+      if (permission) {
+        await tx.unsafe(
+          `INSERT INTO consent_rules (agent_id, resource, permission, granted_at, revoked_at)
+           VALUES ($1, $2, $3, NOW(), NULL)
+           ON CONFLICT (agent_id, resource) DO UPDATE SET
+             permission = EXCLUDED.permission,
+             granted_at = NOW(),
+             revoked_at = NULL`,
+          [agentId, resource, permission]
+        );
+      } else {
+        await tx.unsafe(
+          `UPDATE consent_rules SET revoked_at = NOW()
+           WHERE agent_id = $1 AND resource = $2 AND revoked_at IS NULL`,
+          [agentId, resource]
+        );
+      }
+    }
+
+    const after = Object.fromEntries(
+      desired.map((d) => [d.resource, d.permission || 'none'])
+    );
+    return { before, after };
+  });
+
+  // Audit log (non-fatal, outside transaction)
+  try {
+    await logAuditEntry(userId, {
+      agentId,
+      action: 'oauth_consent_synced',
+      resource: 'consent_rules',
+      details: { before: diff.before, after: diff.after },
+    });
+  } catch (err) {
+    logger.error('syncConsentFromScopes: audit log failed', { error: String(err) });
+  }
 }
 
 function renderConsentPage(params: {

@@ -25,6 +25,7 @@ import {
   validateOAuthScopes,
   parseOAuthScopesToApiKeyScopes,
   permFieldsToScopeString,
+  syncConsentFromScopes,
 } from '@/mcp/oauth';
 import { db } from '@/db/client';
 import { sql } from 'drizzle-orm';
@@ -1093,22 +1094,27 @@ describe('OAuth & Auth Security Fixes', () => {
     });
   });
 
-  // ─── Consent Preservation on Re-auth ────────────────────────────────
+  // ─── Consent Sync on OAuth Token Exchange ────────────────────────────
 
-  describe('Consent rules preserved on OAuth re-auth', () => {
-    test('existing dashboard consent is NOT overwritten by OAuth token exchange', async () => {
+  describe('OAuth consent sync on token exchange', () => {
+    beforeEach(async () => {
+      await resetAllRateLimits();
+    });
+
+    test('OAuth token exchange syncs consent rules to match approved scopes', async () => {
       const oauthClientId = crypto.randomBytes(16).toString('hex');
-      const agentId = 'consent-test-agent';
-      await insertOAuthClient(oauthClientId, 'Consent Test Agent', ['https://localhost:3000/callback']);
+      const agentId = 'consent-sync-agent';
+      await insertOAuthClient(oauthClientId, 'Consent Sync Agent', ['https://localhost:3000/callback']);
 
-      // Pre-create consent rules (simulating dashboard-configured read-only agent)
+      // Pre-create partial consent (simulating existing agent with profile + graph only)
       await db.execute(sql.raw(`
         INSERT INTO ${testUser.schemaName}.consent_rules (agent_id, resource, permission)
-        VALUES ('${agentId}', 'profile', 'read')
-        ON CONFLICT (agent_id, resource) DO UPDATE SET permission = 'read', revoked_at = NULL
+        VALUES ('${agentId}', 'profile', 'read'),
+               ('${agentId}', 'graph', 'read')
+        ON CONFLICT (agent_id, resource) DO UPDATE SET permission = EXCLUDED.permission, revoked_at = NULL
       `));
 
-      // Now do OAuth token exchange for the same agentId
+      // OAuth token exchange with broader scopes (user approved all 5 resources)
       const rawCode = crypto.randomBytes(64).toString('hex');
       const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
       const codeVerifier = crypto.randomBytes(32).toString('hex');
@@ -1116,45 +1122,199 @@ describe('OAuth & Auth Security Fixes', () => {
 
       await db.execute(sql.raw(`
         INSERT INTO public.oauth_authorization_codes (code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, state, expires_at)
-        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback', 'memory:write', '${codeChallenge}', 'S256', '', '${new Date(Date.now() + 60 * 1000).toISOString()}')
+        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback',
+                'profile:read tables:read vectors:read graph:read memory:read',
+                '${codeChallenge}', 'S256', '', '${new Date(Date.now() + 60_000).toISOString()}')
       `));
-
-      const formBody = new URLSearchParams({
-        grant_type: 'authorization_code',
-        code: rawCode,
-        code_verifier: codeVerifier,
-        redirect_uri: 'https://localhost:3000/callback',
-        client_id: oauthClientId,
-      });
 
       const response = await app.request('/v1/auth/oauth/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formBody.toString(),
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: rawCode,
+          code_verifier: codeVerifier,
+          redirect_uri: 'https://localhost:3000/callback',
+          client_id: oauthClientId,
+        }).toString(),
       });
 
       expect(response.status).toBe(200);
 
-      // Verify the original read-only consent was NOT overwritten to write
-      const consentRows = await db.execute(sql.raw(`
-        SELECT permission FROM ${testUser.schemaName}.consent_rules
-        WHERE agent_id = '${agentId}' AND resource = 'profile' AND revoked_at IS NULL
-      `)) as unknown as any[];
-      expect(consentRows.length).toBe(1);
-      expect(consentRows[0].permission).toBe('read');
-
-      // Verify no new consent rules were auto-granted (only the 1 we inserted)
+      // All 5 resources should now have active consent rules
       const allConsent = await db.execute(sql.raw(`
-        SELECT COUNT(*)::int AS count FROM ${testUser.schemaName}.consent_rules
+        SELECT resource, permission FROM ${testUser.schemaName}.consent_rules
         WHERE agent_id = '${agentId}' AND revoked_at IS NULL
+        ORDER BY resource
       `)) as unknown as any[];
-      expect(allConsent[0].count).toBe(1);
+      expect(allConsent.length).toBe(5);
+
+      // Verify specific resources
+      const byResource = Object.fromEntries(allConsent.map((r: any) => [r.resource, r.permission]));
+      expect(byResource['profile']).toBe('read');
+      expect(byResource['tables/*']).toBe('read');
+      expect(byResource['vectors/*']).toBe('read');
+      expect(byResource['graph']).toBe('read');
+      expect(byResource['memory']).toBe('read');
 
       // Cleanup
       await deleteApiKeysForAgent(testUser.userId, agentId);
+      await db.execute(sql.raw(`DELETE FROM ${testUser.schemaName}.consent_rules WHERE agent_id = '${agentId}'`));
+      await deleteAuthCodes(oauthClientId);
+      await deleteOAuthClient(oauthClientId);
+    });
+
+    test('OAuth re-auth upgrades read → write when user approves write', async () => {
+      const oauthClientId = crypto.randomBytes(16).toString('hex');
+      const agentId = 'upgrade-agent';
+      await insertOAuthClient(oauthClientId, 'Upgrade Agent', ['https://localhost:3000/callback']);
+
+      // Pre-create read-only consent for profile
       await db.execute(sql.raw(`
-        DELETE FROM ${testUser.schemaName}.consent_rules WHERE agent_id = '${agentId}'
+        INSERT INTO ${testUser.schemaName}.consent_rules (agent_id, resource, permission)
+        VALUES ('${agentId}', 'profile', 'read')
+        ON CONFLICT (agent_id, resource) DO UPDATE SET permission = 'read', revoked_at = NULL
       `));
+
+      // OAuth exchange with profile:write scope
+      const rawCode = crypto.randomBytes(64).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+      const codeVerifier = crypto.randomBytes(32).toString('hex');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+      await db.execute(sql.raw(`
+        INSERT INTO public.oauth_authorization_codes (code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, state, expires_at)
+        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback',
+                'profile:read profile:write', '${codeChallenge}', 'S256', '', '${new Date(Date.now() + 60_000).toISOString()}')
+      `));
+
+      const response = await app.request('/v1/auth/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code', code: rawCode, code_verifier: codeVerifier,
+          redirect_uri: 'https://localhost:3000/callback', client_id: oauthClientId,
+        }).toString(),
+      });
+      expect(response.status).toBe(200);
+
+      // profile should now be 'write'
+      const consent = await db.execute(sql.raw(`
+        SELECT permission FROM ${testUser.schemaName}.consent_rules
+        WHERE agent_id = '${agentId}' AND resource = 'profile' AND revoked_at IS NULL
+      `)) as unknown as any[];
+      expect(consent[0].permission).toBe('write');
+
+      // Cleanup
+      await deleteApiKeysForAgent(testUser.userId, agentId);
+      await db.execute(sql.raw(`DELETE FROM ${testUser.schemaName}.consent_rules WHERE agent_id = '${agentId}'`));
+      await deleteAuthCodes(oauthClientId);
+      await deleteOAuthClient(oauthClientId);
+    });
+
+    test('OAuth re-auth downgrades write → read when user narrows scope', async () => {
+      const oauthClientId = crypto.randomBytes(16).toString('hex');
+      const agentId = 'downgrade-agent';
+      await insertOAuthClient(oauthClientId, 'Downgrade Agent', ['https://localhost:3000/callback']);
+
+      // Pre-create write consent for profile
+      await db.execute(sql.raw(`
+        INSERT INTO ${testUser.schemaName}.consent_rules (agent_id, resource, permission)
+        VALUES ('${agentId}', 'profile', 'write')
+        ON CONFLICT (agent_id, resource) DO UPDATE SET permission = 'write', revoked_at = NULL
+      `));
+
+      // OAuth exchange with only profile:read (no write)
+      const rawCode = crypto.randomBytes(64).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+      const codeVerifier = crypto.randomBytes(32).toString('hex');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+      await db.execute(sql.raw(`
+        INSERT INTO public.oauth_authorization_codes (code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, state, expires_at)
+        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback',
+                'profile:read', '${codeChallenge}', 'S256', '', '${new Date(Date.now() + 60_000).toISOString()}')
+      `));
+
+      const response = await app.request('/v1/auth/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code', code: rawCode, code_verifier: codeVerifier,
+          redirect_uri: 'https://localhost:3000/callback', client_id: oauthClientId,
+        }).toString(),
+      });
+      expect(response.status).toBe(200);
+
+      // profile should be downgraded to 'read'
+      const consent = await db.execute(sql.raw(`
+        SELECT permission FROM ${testUser.schemaName}.consent_rules
+        WHERE agent_id = '${agentId}' AND resource = 'profile' AND revoked_at IS NULL
+      `)) as unknown as any[];
+      expect(consent[0].permission).toBe('read');
+
+      // Cleanup
+      await deleteApiKeysForAgent(testUser.userId, agentId);
+      await db.execute(sql.raw(`DELETE FROM ${testUser.schemaName}.consent_rules WHERE agent_id = '${agentId}'`));
+      await deleteAuthCodes(oauthClientId);
+      await deleteOAuthClient(oauthClientId);
+    });
+
+    test('OAuth re-auth revokes resources user set to none', async () => {
+      const oauthClientId = crypto.randomBytes(16).toString('hex');
+      const agentId = 'revoke-agent';
+      await insertOAuthClient(oauthClientId, 'Revoke Agent', ['https://localhost:3000/callback']);
+
+      // Pre-create consent for all 5 resources
+      for (const resource of ['profile', 'tables/*', 'vectors/*', 'graph', 'memory']) {
+        await db.execute(sql.raw(`
+          INSERT INTO ${testUser.schemaName}.consent_rules (agent_id, resource, permission)
+          VALUES ('${agentId}', '${resource}', 'read')
+          ON CONFLICT (agent_id, resource) DO UPDATE SET permission = 'read', revoked_at = NULL
+        `));
+      }
+
+      // OAuth exchange with ONLY profile:read (user set everything else to none)
+      const rawCode = crypto.randomBytes(64).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+      const codeVerifier = crypto.randomBytes(32).toString('hex');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+      await db.execute(sql.raw(`
+        INSERT INTO public.oauth_authorization_codes (code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, state, expires_at)
+        VALUES ('${codeHash}', '${oauthClientId}', '${testUser.userId}', 'https://localhost:3000/callback',
+                'profile:read', '${codeChallenge}', 'S256', '', '${new Date(Date.now() + 60_000).toISOString()}')
+      `));
+
+      const response = await app.request('/v1/auth/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code', code: rawCode, code_verifier: codeVerifier,
+          redirect_uri: 'https://localhost:3000/callback', client_id: oauthClientId,
+        }).toString(),
+      });
+      expect(response.status).toBe(200);
+
+      // Only profile should remain active
+      const active = await db.execute(sql.raw(`
+        SELECT resource, permission FROM ${testUser.schemaName}.consent_rules
+        WHERE agent_id = '${agentId}' AND revoked_at IS NULL ORDER BY resource
+      `)) as unknown as any[];
+      expect(active.length).toBe(1);
+      expect(active[0].resource).toBe('profile');
+      expect(active[0].permission).toBe('read');
+
+      // Revoked resources should have revoked_at set (not deleted)
+      const revoked = await db.execute(sql.raw(`
+        SELECT resource FROM ${testUser.schemaName}.consent_rules
+        WHERE agent_id = '${agentId}' AND revoked_at IS NOT NULL ORDER BY resource
+      `)) as unknown as any[];
+      expect(revoked.length).toBe(4);
+
+      // Cleanup
+      await deleteApiKeysForAgent(testUser.userId, agentId);
+      await db.execute(sql.raw(`DELETE FROM ${testUser.schemaName}.consent_rules WHERE agent_id = '${agentId}'`));
       await deleteAuthCodes(oauthClientId);
       await deleteOAuthClient(oauthClientId);
     });
@@ -1449,6 +1609,35 @@ describe('OAuth & Auth Security Fixes', () => {
       expect(result).toContain('graph:read');
       expect(result).not.toContain('tables');
       expect(result).not.toContain('memory');
+    });
+  });
+
+  // ─── syncConsentFromScopes Unit Tests ─────────────────────────────
+
+  describe('syncConsentFromScopes', () => {
+    test('parses mixed scope string and syncs correctly', async () => {
+      const agentId = 'scope-parse-agent';
+
+      await syncConsentFromScopes(
+        testUser.userId,
+        agentId,
+        'profile:read profile:write tables:read vectors:read vectors:write graph:read'
+      );
+
+      const consent = await db.execute(sql.raw(`
+        SELECT resource, permission FROM ${testUser.schemaName}.consent_rules
+        WHERE agent_id = '${agentId}' AND revoked_at IS NULL ORDER BY resource
+      `)) as unknown as any[];
+
+      const byResource = Object.fromEntries(consent.map((r: any) => [r.resource, r.permission]));
+      expect(byResource['profile']).toBe('write');     // read+write → write
+      expect(byResource['tables/*']).toBe('read');     // read only → read
+      expect(byResource['vectors/*']).toBe('write');   // read+write → write
+      expect(byResource['graph']).toBe('read');        // read only (no write scope exists)
+      expect(consent.length).toBe(4);                  // memory not in scope → not created
+
+      // Cleanup
+      await db.execute(sql.raw(`DELETE FROM ${testUser.schemaName}.consent_rules WHERE agent_id = '${agentId}'`));
     });
   });
 });
