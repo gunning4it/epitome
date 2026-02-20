@@ -14,22 +14,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { ENTITY_DISPLAY, type EntityType } from '@/lib/ontology';
 import type { Entity, Edge } from '@/lib/types';
 
-const ENTITY_LEGEND: { type: string; label: string; color: string }[] = [
-  { type: 'person', label: 'Person', color: '#3b82f6' },
-  { type: 'place', label: 'Place', color: '#10b981' },
-  { type: 'organization', label: 'Organization', color: '#8b5cf6' },
-  { type: 'event', label: 'Event', color: '#f59e0b' },
-  { type: 'concept', label: 'Concept', color: '#06b6d4' },
-  { type: 'creative_work', label: 'Creative Work', color: '#ec4899' },
-  { type: 'product', label: 'Product', color: '#f97316' },
-  { type: 'food', label: 'Food', color: '#84cc16' },
-  { type: 'health', label: 'Health', color: '#ef4444' },
-  { type: 'hobby', label: 'Hobby', color: '#14b8a6' },
-  { type: 'skill', label: 'Skill', color: '#6366f1' },
-  { type: 'other', label: 'Other', color: '#71717a' },
-];
+const ENTITY_LEGEND = (Object.entries(ENTITY_DISPLAY) as [EntityType, { label: string; color: string }][]).map(
+  ([type, config]) => ({ type, label: config.label, color: config.color })
+);
 
 export default function Graph() {
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
@@ -234,13 +224,36 @@ export default function Graph() {
                     </div>
                   </div>
 
+                  {/* Evidence */}
+                  <div>
+                    <div className="text-sm font-medium text-foreground mb-2">Evidence</div>
+                    <div className="space-y-1 text-sm">
+                      {selectedEntity.properties?.origin && (
+                        <div>
+                          <span className="text-muted-foreground">Source:</span>{' '}
+                          <span className="text-foreground">{String(selectedEntity.properties.origin)}</span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-muted-foreground">First seen:</span>{' '}
+                        <span className="text-foreground">{new Date(selectedEntity.first_seen).toLocaleDateString()}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Last seen:</span>{' '}
+                        <span className="text-foreground">{new Date(selectedEntity.last_seen).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Properties */}
                   {selectedEntity.properties &&
-                    Object.keys(selectedEntity.properties).length > 0 && (
+                    Object.keys(selectedEntity.properties).filter(k => k !== 'origin').length > 0 && (
                       <div>
                         <div className="text-sm font-medium text-foreground mb-2">Properties</div>
                         <div className="space-y-2">
-                          {Object.entries(selectedEntity.properties).map(([key, value]) => (
+                          {Object.entries(selectedEntity.properties)
+                            .filter(([key]) => key !== 'origin')
+                            .map(([key, value]) => (
                             <div key={key} className="text-sm">
                               <span className="text-muted-foreground">{key}:</span>{' '}
                               <span className="text-foreground">
@@ -259,7 +272,7 @@ export default function Graph() {
                         Connected Entities ({neighborsData.length})
                       </div>
                       <div className="space-y-2">
-                        {neighborsData.map((neighbor) => (
+                        {neighborsData.map((neighbor: Entity & { edge?: { relation: string; weight: number; confidence: number } }) => (
                           <div
                             key={neighbor.id}
                             className="p-3 bg-muted rounded-lg hover:bg-accent cursor-pointer transition-colors"
@@ -269,7 +282,7 @@ export default function Graph() {
                               {neighbor.name}
                             </div>
                             <div className="text-xs text-muted-foreground mt-1">
-                              {neighbor.type}
+                              {neighbor.type} {neighbor.edge?.relation && <Badge variant="outline" className="ml-1 text-[10px]">{neighbor.edge.relation}</Badge>}
                             </div>
                           </div>
                         ))}
@@ -278,16 +291,6 @@ export default function Graph() {
                   )}
 
                   <Separator />
-
-                  {/* Timestamps */}
-                  <div className="text-xs text-muted-foreground space-y-1">
-                    <div>
-                      First seen: {new Date(selectedEntity.first_seen).toLocaleDateString()}
-                    </div>
-                    <div>
-                      Last seen: {new Date(selectedEntity.last_seen).toLocaleDateString()}
-                    </div>
-                  </div>
 
                   {/* Actions */}
                   <div className="space-y-2">

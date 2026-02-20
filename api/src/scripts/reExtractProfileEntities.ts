@@ -2,25 +2,40 @@
  * Re-extract profile entities for all users
  *
  * Re-runs rule-based entity extraction on existing profile data so that
- * family members stored as objects (e.g. { wife: { name, birthday } })
- * get extracted into the knowledge graph.
+ * work/career, education, family, interests, and skills get extracted
+ * into the knowledge graph.
  *
- * Run with: npx tsx api/src/scripts/reExtractProfileEntities.ts
+ * Features:
+ *   --dry-run    Log what would be extracted without writing to the graph
+ *   Chunked:     Processes 50 profiles per batch with 1s delay
+ *   Idempotent:  Skips profiles where work/education entities already exist
+ *
+ * Run with: npx tsx api/src/scripts/reExtractProfileEntities.ts [--dry-run]
  *
  * Requires:
  *   - DATABASE_URL environment variable
  */
 
 import { sql, withUserSchema } from '@/db/client';
-import { extractEntitiesFromRecord } from '@/services/entityExtraction';
+import { extractEntitiesFromRecord, extractEntitiesRuleBased } from '@/services/entityExtraction';
 
 interface UserRow {
   id: string;
   schema_name: string;
 }
 
+const BATCH_SIZE = 50;
+const BATCH_DELAY_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function main(): Promise<void> {
+  const dryRun = process.argv.includes('--dry-run');
+
   console.log('=== Re-Extract Profile Entities ===');
+  console.log(`Mode: ${dryRun ? 'DRY RUN (no writes)' : 'LIVE'}`);
   console.log(`Started at ${new Date().toISOString()}`);
 
   // Get all user schemas
@@ -34,51 +49,91 @@ async function main(): Promise<void> {
 
   let totalProcessed = 0;
   let totalSkipped = 0;
+  let totalAlreadyDone = 0;
   let totalErrored = 0;
   let totalEntitiesExtracted = 0;
 
-  for (const user of users) {
-    try {
-      console.log(`Processing user ${user.id} (${user.schema_name})...`);
+  // Process in chunks
+  for (let i = 0; i < users.length; i += BATCH_SIZE) {
+    const batch = users.slice(i, i + BATCH_SIZE);
+    console.log(`--- Batch ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} users) ---`);
 
-      // Get latest profile data
-      const profileRows = await withUserSchema(user.id, async (tx) => {
-        return tx.unsafe(`
-          SELECT data FROM profile
-          ORDER BY version DESC
-          LIMIT 1
-        `);
-      });
+    for (const user of batch) {
+      try {
+        // Get latest profile data
+        const profileRows = await withUserSchema(user.id, async (tx) => {
+          return tx.unsafe(`
+            SELECT data FROM profile
+            ORDER BY version DESC
+            LIMIT 1
+          `);
+        });
 
-      if (!profileRows[0]?.data) {
-        console.log('  Skipped: no profile data');
-        totalSkipped++;
-        continue;
+        if (!profileRows[0]?.data) {
+          totalSkipped++;
+          continue;
+        }
+
+        const profileData = profileRows[0].data;
+
+        // Idempotency check: skip if work/education entities already exist from extraction
+        const alreadyExtracted = await withUserSchema(user.id, async (tx) => {
+          const rows = await tx.unsafe(`
+            SELECT COUNT(*)::int as cnt FROM entities
+            WHERE type = 'organization'
+              AND _deleted_at IS NULL
+              AND (
+                (properties->>'category') IN ('employer', 'education')
+              )
+          `);
+          return (rows[0]?.cnt || 0) > 0;
+        });
+
+        if (alreadyExtracted) {
+          totalAlreadyDone++;
+          continue;
+        }
+
+        if (dryRun) {
+          // Dry-run: just extract and report without writing
+          const entities = extractEntitiesRuleBased('profile', profileData);
+          const orgEntities = entities.filter(e => e.type === 'organization');
+          if (orgEntities.length > 0) {
+            console.log(`  [DRY] ${user.schema_name}: would extract ${entities.length} entities (${orgEntities.map(e => e.name).join(', ')})`);
+          }
+          totalEntitiesExtracted += entities.length;
+          totalProcessed++;
+        } else {
+          // Live: actually extract and write to graph
+          const result = await extractEntitiesFromRecord(
+            user.id,
+            'profile',
+            profileData,
+            'rule_based'
+          );
+
+          if (result.entities.length > 0) {
+            console.log(`  ${user.schema_name}: extracted ${result.entities.length} entity(ies)`);
+          }
+          totalEntitiesExtracted += result.entities.length;
+          totalProcessed++;
+        }
+      } catch (error) {
+        console.error(`  ERROR processing user ${user.id}: ${String(error)}`);
+        totalErrored++;
       }
+    }
 
-      const profileData = profileRows[0].data;
-      console.log(`  Profile name: ${profileData.name || '(unnamed)'}`);
-
-      // Run entity extraction on the profile
-      const result = await extractEntitiesFromRecord(
-        user.id,
-        'profile',
-        profileData,
-        'rule_based'
-      );
-
-      console.log(`  Extracted ${result.entities.length} entity(ies)`);
-      totalEntitiesExtracted += result.entities.length;
-      totalProcessed++;
-    } catch (error) {
-      console.error(`  ERROR processing user ${user.id}: ${String(error)}`);
-      totalErrored++;
+    // Delay between batches
+    if (i + BATCH_SIZE < users.length) {
+      await sleep(BATCH_DELAY_MS);
     }
   }
 
   console.log('\n=== Re-Extraction Complete ===');
   console.log(`Users processed: ${totalProcessed}`);
   console.log(`Users skipped (no profile): ${totalSkipped}`);
+  console.log(`Users already done: ${totalAlreadyDone}`);
   console.log(`Users errored: ${totalErrored}`);
   console.log(`Total entities extracted: ${totalEntitiesExtracted}`);
   console.log(`Finished at ${new Date().toISOString()}`);

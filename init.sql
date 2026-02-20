@@ -703,6 +703,19 @@ BEGIN
   CREATE INDEX idx_context_feedback_created_at ON context_feedback(created_at DESC);
   CREATE INDEX idx_context_feedback_feedback ON context_feedback(feedback);
 
+  -- Edge quarantine (holds edges that failed validation during extraction)
+  CREATE TABLE edge_quarantine (
+    id          SERIAL PRIMARY KEY,
+    source_type VARCHAR(50),
+    target_type VARCHAR(50),
+    relation    VARCHAR(100),
+    source_name VARCHAR(500),
+    target_name VARCHAR(500),
+    reason      TEXT,
+    payload     JSONB,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+  );
+
   -- Audit log (partitioned)
   CREATE TABLE audit_log (
     id          BIGSERIAL,

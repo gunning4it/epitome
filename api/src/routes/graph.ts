@@ -653,6 +653,10 @@ graph.post('/edges', requireAuth, zValidator('json', createEdgeSchema), async (c
       agentSource: agentId,
     });
 
+    if (!edge) {
+      return c.json({ error: 'Edge rejected by ontology validation (quarantined or invalid relation)' }, 422);
+    }
+
     // Log audit entry
     await logAuditEntry(userId, {
       agentId: agentId || 'user',

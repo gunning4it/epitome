@@ -218,6 +218,21 @@ export async function createTestUser(embeddingDim: number = 1536): Promise<TestU
       WHERE revoked_at IS NULL;
   `));
 
+  // Create edge_quarantine table (for ontology-rejected edges)
+  await db.execute(sql.raw(`
+    CREATE TABLE ${schemaName}.edge_quarantine (
+      id SERIAL PRIMARY KEY,
+      source_type VARCHAR(50) NOT NULL,
+      target_type VARCHAR(50) NOT NULL,
+      relation VARCHAR(100) NOT NULL,
+      source_name VARCHAR(500),
+      target_name VARCHAR(500),
+      reason TEXT,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `));
+
   return { userId, schemaName, email, apiKey };
 }
 

@@ -13,7 +13,7 @@ GraphService provides basic CRUD operations for the Epitome knowledge graph. All
 ```
 Knowledge Graph (PostgreSQL)
 ├── entities (nodes)
-│   ├── 10 entity types: person, place, food, topic, preference, event, activity, medication, media, custom
+│   ├── 11 entity types: person, organization, place, food, topic, preference, event, activity, medication, media, custom
 │   ├── Unique constraint: (type, lower(name)) WHERE _deleted_at IS NULL
 │   └── Fuzzy search via pg_trgm similarity
 │
@@ -44,7 +44,7 @@ Knowledge Graph (PostgreSQL)
 
 ## Edge Relations
 
-Common relations: `likes`, `dislikes`, `ate`, `visited`, `attended_by`, `located_at`, `married_to`, `works_at`, `takes`, `performed`, `category`, `related_to`, `thread_next`, `contradicts`
+Common relations: `likes`, `dislikes`, `ate`, `visited`, `attended`, `located_at`, `married_to`, `works_at`, `takes`, `performed`, `category`, `related_to`, `thread_next`, `contradicts`, `interested_in`, `allergic_to`, `founded`, `parent_of`, `friend`, `knows`, `family_member`, `lives_at`, `works_out_at`, `has_skill`, `follows`, `tracks`, `similar_to`, `part_of`, `has_condition`
 
 ## API Reference
 
