@@ -143,6 +143,9 @@ function getBaseUrl(): string {
  */
 export async function protectedResourceMetadata(c: Context) {
   const baseUrl = getBaseUrl();
+  logger.info('OAuth: protected-resource metadata requested', {
+    userAgent: c.req.header('User-Agent')?.substring(0, 100),
+  });
 
   return c.json({
     resource: baseUrl,
@@ -172,6 +175,9 @@ export async function protectedResourceMetadata(c: Context) {
  */
 export async function oauthDiscovery(c: Context) {
   const baseUrl = getBaseUrl();
+  logger.info('OAuth: authorization-server metadata requested', {
+    userAgent: c.req.header('User-Agent')?.substring(0, 100),
+  });
 
   return c.json({
     issuer: baseUrl,
@@ -400,8 +406,24 @@ export async function oauthAuthorizeConsent(c: Context) {
   const codeChallenge = body['code_challenge'] as string;
   const codeChallengeMethod = body['code_challenge_method'] as string || 'S256';
   const state = body['state'] as string || '';
-  const scope = body['scope'] as string || '';
   const resource = body['resource'] as string || '';
+
+  // Build scope from per-resource permission radio buttons (new format)
+  // or fall back to legacy hidden scope field (backward compat)
+  const permFields: Record<string, string> = {};
+  let hasPermFields = false;
+  for (const res of CONSENT_RESOURCES) {
+    const fieldName = `perm_${res.key}`;
+    const value = body[fieldName] as string | undefined;
+    if (value) {
+      permFields[res.key] = value;
+      hasPermFields = true;
+    }
+  }
+
+  const scope = hasPermFields
+    ? permFieldsToScopeString(permFields)
+    : (body['scope'] as string || '');
 
   // C-3 SECURITY FIX: Verify CSRF token (double-submit cookie pattern)
   const csrfFromForm = body['csrf_token'] as string;
@@ -710,6 +732,27 @@ const PAGE_STYLES = `
     .error-text { color: #ef4444; text-align: center; }
     .divider { border-top: 1px solid rgba(255,255,255,0.06); margin: 1.5rem 0; }
     .footer { text-align: center; font-size: 0.8rem; color: #555; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 1rem; margin-top: 1.5rem; }
+    .footer a { color: #666; text-decoration: underline; text-underline-offset: 2px; }
+    .footer a:hover { color: #888; }
+    .legal-text { font-size: 0.75rem; color: #444; margin-top: 0.5rem; }
+    .perm-section { margin-bottom: 1rem; }
+    .perm-section-label { color: #666; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-bottom: 0.5rem; }
+    .perm-row { display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; }
+    .perm-info { flex: 1; min-width: 0; }
+    .perm-name { font-size: 0.875rem; font-weight: 500; color: #fafafa; }
+    .perm-desc { font-size: 0.7rem; color: #666; margin-top: 0.1rem; }
+    .perm-group { display: flex; gap: 2px; flex-shrink: 0; margin-left: 0.75rem; }
+    .perm-input { position: absolute; opacity: 0; pointer-events: none; }
+    .perm-label {
+      display: inline-block; padding: 0.3rem 0.6rem; border-radius: 6px;
+      font-size: 0.7rem; font-weight: 500; font-family: 'Inter', sans-serif;
+      cursor: pointer; border: 1px solid rgba(255,255,255,0.1); color: #888;
+      background: transparent; transition: all 0.15s ease; white-space: nowrap;
+    }
+    .perm-label:hover { border-color: rgba(255,255,255,0.2); color: #aaa; }
+    .perm-input[value="none"]:checked + .perm-label { background: rgba(255,255,255,0.08); color: #888; border-color: rgba(255,255,255,0.15); }
+    .perm-input[value="read"]:checked + .perm-label { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+    .perm-input[value="write"]:checked + .perm-label { background: #16a34a; color: #fff; border-color: #16a34a; }
   </style>
 `;
 
@@ -738,10 +781,67 @@ function renderLoginPage(authorizeUrl: string): string {
       <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615Z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.997 8.997 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332Z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.166 6.656 3.58 9 3.58Z"/></svg>
       Sign in with Google
     </a>
-    <div class="footer">Your data stays yours. Epitome never shares your memory.</div>
+    <div class="footer">
+      Your data stays yours. Epitome never shares your memory.
+      <div class="legal-text">
+        <a href="https://epitome.fyi/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>
+        &middot;
+        <a href="https://epitome.fyi/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+      </div>
+    </div>
   </div>
 </body>
 </html>`;
+}
+
+/**
+ * Resources shown on the OAuth consent page.
+ * Matches the dashboard Agents page RESOURCES array.
+ */
+const CONSENT_RESOURCES: Array<{
+  key: string;
+  label: string;
+  description: string;
+  readScope: string;
+  writeScope: string | null; // null = no write scope exists (e.g., graph)
+}> = [
+  { key: 'profile', label: 'Profile', description: 'Name, preferences, personal info', readScope: 'profile:read', writeScope: 'profile:write' },
+  { key: 'tables/*', label: 'All Tables', description: 'Structured data (meals, workouts, etc.)', readScope: 'tables:read', writeScope: 'tables:write' },
+  { key: 'vectors/*', label: 'All Vectors', description: 'Semantic search embeddings', readScope: 'vectors:read', writeScope: 'vectors:write' },
+  { key: 'graph', label: 'Knowledge Graph', description: 'Entities and relationships', readScope: 'graph:read', writeScope: null },
+  { key: 'memory', label: 'Memory', description: 'Saved memories and context', readScope: 'memory:read', writeScope: 'memory:write' },
+];
+
+/**
+ * Determine the default permission level for a resource based on requested scopes.
+ * write > read > none
+ */
+function defaultPermForResource(
+  resource: typeof CONSENT_RESOURCES[number],
+  requestedScopes: Set<string>
+): 'none' | 'read' | 'write' {
+  if (resource.writeScope && requestedScopes.has(resource.writeScope)) return 'write';
+  if (requestedScopes.has(resource.readScope)) return 'read';
+  // If no specific scopes were requested (e.g., empty scope), default to write
+  if (requestedScopes.size === 0) return resource.writeScope ? 'write' : 'read';
+  return 'none';
+}
+
+/**
+ * Convert per-resource permission form fields back to OAuth scope string.
+ * Called from oauthAuthorizeConsent() when perm_* fields are present.
+ */
+export function permFieldsToScopeString(permFields: Record<string, string>): string {
+  const scopes: string[] = [];
+  for (const resource of CONSENT_RESOURCES) {
+    const level = permFields[resource.key];
+    if (!level || level === 'none') continue;
+    scopes.push(resource.readScope);
+    if (level === 'write' && resource.writeScope) {
+      scopes.push(resource.writeScope);
+    }
+  }
+  return scopes.join(' ');
 }
 
 function renderConsentPage(params: {
@@ -756,13 +856,39 @@ function renderConsentPage(params: {
   resource: string;
   csrfToken: string;
 }): string {
-  const scopes = params.scope ? params.scope.split(/[\s,]+/).filter(Boolean) : ['full access'];
-  const scopeBadges = scopes
-    .map((s) => {
-      const cls = s.endsWith(':write') ? 'scope-write' : s.endsWith(':read') ? 'scope-read' : 'scope-default';
-      return `<span class="scope-badge ${cls}">${escapeHtml(s)}</span>`;
-    })
-    .join('');
+  const requestedScopes = new Set(
+    params.scope ? params.scope.split(/[\s,]+/).filter(Boolean) : []
+  );
+
+  const permissionRows = CONSENT_RESOURCES.map((resource) => {
+    const defaultLevel = defaultPermForResource(resource, requestedScopes);
+    const hasWrite = resource.writeScope !== null;
+
+    // Build radio buttons: None | Read | Read & Write (or just None | Read for graph)
+    const levels: Array<{ value: string; label: string }> = [
+      { value: 'none', label: 'None' },
+      { value: 'read', label: 'Read' },
+    ];
+    if (hasWrite) {
+      levels.push({ value: 'write', label: 'Read &amp; Write' });
+    }
+
+    const fieldName = `perm_${resource.key}`;
+    const radios = levels
+      .map((level) => {
+        const checked = level.value === defaultLevel ? ' checked' : '';
+        return `<span><input type="radio" class="perm-input" name="${escapeAttr(fieldName)}" value="${level.value}"${checked} id="${escapeAttr(fieldName)}_${level.value}"><label class="perm-label" for="${escapeAttr(fieldName)}_${level.value}">${level.label}</label></span>`;
+      })
+      .join('');
+
+    return `<div class="perm-row">
+        <div class="perm-info">
+          <div class="perm-name">${escapeHtml(resource.label)}</div>
+          <div class="perm-desc">${escapeHtml(resource.description)}</div>
+        </div>
+        <div class="perm-group">${radios}</div>
+      </div>`;
+  }).join('\n      ');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -774,7 +900,7 @@ function renderConsentPage(params: {
   ${PAGE_STYLES}
 </head>
 <body>
-  <div class="card">
+  <div class="card" style="max-width:480px;">
     <div class="logo">ep<span>i</span>tome</div>
     <h2>Authorize Access</h2>
 
@@ -786,10 +912,6 @@ function renderConsentPage(params: {
       <div class="label">Signed in as</div>
       <div class="value">${escapeHtml(params.userEmail)}</div>
     </div>
-    <div class="info">
-      <div class="label">Permissions requested</div>
-      <div class="scope-badges">${scopeBadges}</div>
-    </div>
 
     <form method="POST" action="/v1/auth/oauth/authorize">
       <input type="hidden" name="csrf_token" value="${escapeAttr(params.csrfToken)}">
@@ -798,8 +920,12 @@ function renderConsentPage(params: {
       <input type="hidden" name="code_challenge" value="${escapeAttr(params.codeChallenge)}">
       <input type="hidden" name="code_challenge_method" value="${escapeAttr(params.codeChallengeMethod)}">
       <input type="hidden" name="state" value="${escapeAttr(params.state)}">
-      <input type="hidden" name="scope" value="${escapeAttr(params.scope)}">
       <input type="hidden" name="resource" value="${escapeAttr(params.resource)}">
+
+      <div class="perm-section">
+        <div class="perm-section-label">Permissions</div>
+        ${permissionRows}
+      </div>
 
       <div class="btn-row">
         <button type="submit" name="action" value="deny" class="btn btn-secondary">Deny</button>
@@ -807,7 +933,15 @@ function renderConsentPage(params: {
       </div>
     </form>
 
-    <div class="footer">This grants the app access to your Epitome memory.</div>
+    <div class="footer">
+      This grants the app access to your Epitome memory.
+      <div class="legal-text">
+        By approving, you agree to our
+        <a href="https://epitome.fyi/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>
+        and
+        <a href="https://epitome.fyi/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.
+      </div>
+    </div>
   </div>
 </body>
 </html>`;

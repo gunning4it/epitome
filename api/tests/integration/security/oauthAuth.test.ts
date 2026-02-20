@@ -24,6 +24,7 @@ import {
   VALID_OAUTH_SCOPES,
   validateOAuthScopes,
   parseOAuthScopesToApiKeyScopes,
+  permFieldsToScopeString,
 } from '@/mcp/oauth';
 import { db } from '@/db/client';
 import { sql } from 'drizzle-orm';
@@ -544,7 +545,7 @@ describe('OAuth & Auth Security Fixes', () => {
       const csrfCookieMatch = setCookieHeader.match(/csrf_token=([^;]+)/);
       expect(csrfCookieMatch).toBeTruthy();
 
-      // Submit consent with CSRF token
+      // Submit consent with CSRF token (using per-resource permission fields)
       const formBody = new URLSearchParams({
         action: 'approve',
         client_id: oauthClientId,
@@ -552,7 +553,11 @@ describe('OAuth & Auth Security Fixes', () => {
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',
         state: '',
-        scope: 'profile:read',
+        'perm_profile': 'read',
+        'perm_tables/*': 'none',
+        'perm_vectors/*': 'none',
+        'perm_graph': 'none',
+        'perm_memory': 'none',
         csrf_token: csrfToken!,
       });
 
@@ -1152,6 +1157,298 @@ describe('OAuth & Auth Security Fixes', () => {
       `));
       await deleteAuthCodes(oauthClientId);
       await deleteOAuthClient(oauthClientId);
+    });
+  });
+
+  // ─── Per-Resource Permission Controls ──────────────────────────────
+
+  describe('Per-resource permission controls on consent page', () => {
+    let oauthClientId: string;
+
+    beforeAll(async () => {
+      oauthClientId = crypto.randomBytes(16).toString('hex');
+      await insertOAuthClient(oauthClientId, 'Perm Controls App', ['https://localhost:3000/callback']);
+    });
+
+    afterAll(async () => {
+      await deleteApiKeysForAgent(testUser.userId, 'perm-controls-app');
+      await deleteAuthCodes(oauthClientId);
+      await deleteOAuthClient(oauthClientId);
+    });
+
+    test('consent page renders per-resource radio buttons', async () => {
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = hashSessionToken(sessionToken);
+      await insertSession(testUser.userId, tokenHash, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+
+      const codeChallenge = crypto.createHash('sha256').update('test_verifier').digest('base64url');
+      const headers = new Headers();
+      headers.set('Cookie', `epitome_session=${sessionToken}`);
+
+      const url = `/v1/auth/oauth/authorize?client_id=${oauthClientId}&redirect_uri=${encodeURIComponent('https://localhost:3000/callback')}&code_challenge=${codeChallenge}&code_challenge_method=S256&response_type=code&scope=profile:read%20memory:write`;
+
+      const response = await app.request(url, { method: 'GET', headers });
+      expect(response.status).toBe(200);
+
+      const html = await response.text();
+      // Should have per-resource radio buttons
+      expect(html).toContain('name="perm_profile"');
+      expect(html).toContain('name="perm_tables/*"');
+      expect(html).toContain('name="perm_vectors/*"');
+      expect(html).toContain('name="perm_graph"');
+      expect(html).toContain('name="perm_memory"');
+      // Should NOT have the old hidden scope field
+      expect(html).not.toContain('name="scope"');
+      // Should have privacy/terms links
+      expect(html).toContain('epitome.fyi/terms');
+      expect(html).toContain('epitome.fyi/privacy');
+      // Should have resource labels
+      expect(html).toContain('Profile');
+      expect(html).toContain('Knowledge Graph');
+      expect(html).toContain('Memory');
+
+      await deleteSession(tokenHash);
+    });
+
+    test('partial permissions produce correct scope string', async () => {
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = hashSessionToken(sessionToken);
+      await insertSession(testUser.userId, tokenHash, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+
+      // Get consent page to obtain CSRF token
+      const codeChallenge = crypto.createHash('sha256').update('partial_verifier_pad_to_43chars!!!').digest('base64url');
+      const getHeaders = new Headers();
+      getHeaders.set('Cookie', `epitome_session=${sessionToken}`);
+
+      const getUrl = `/v1/auth/oauth/authorize?client_id=${oauthClientId}&redirect_uri=${encodeURIComponent('https://localhost:3000/callback')}&code_challenge=${codeChallenge}&code_challenge_method=S256&response_type=code&scope=profile:read`;
+
+      const getResponse = await app.request(getUrl, { method: 'GET', headers: getHeaders });
+      expect(getResponse.status).toBe(200);
+
+      const html = await getResponse.text();
+      const csrfMatch = html.match(/name="csrf_token"\s+value="([^"]+)"/);
+      expect(csrfMatch).toBeTruthy();
+      const csrfToken = csrfMatch![1];
+      const setCookieHeader = getResponse.headers.get('set-cookie') || '';
+      const csrfCookieMatch = setCookieHeader.match(/csrf_token=([^;]+)/);
+      expect(csrfCookieMatch).toBeTruthy();
+
+      // Submit with partial permissions: profile=read, memory=write, rest=none
+      const formBody = new URLSearchParams({
+        action: 'approve',
+        client_id: oauthClientId,
+        redirect_uri: 'https://localhost:3000/callback',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        state: '',
+        'perm_profile': 'read',
+        'perm_tables/*': 'none',
+        'perm_vectors/*': 'none',
+        'perm_graph': 'none',
+        'perm_memory': 'write',
+        csrf_token: csrfToken!,
+      });
+
+      const postHeaders = new Headers();
+      postHeaders.set('Content-Type', 'application/x-www-form-urlencoded');
+      postHeaders.set('Cookie', `epitome_session=${sessionToken}; csrf_token=${csrfCookieMatch![1]}`);
+
+      const postResponse = await app.request('/v1/auth/oauth/authorize', {
+        method: 'POST',
+        headers: postHeaders,
+        body: formBody.toString(),
+      });
+
+      expect(postResponse.status).toBe(302);
+      const location = postResponse.headers.get('location')!;
+      expect(location).toContain('code=');
+
+      // Verify stored auth code has the correct partial scope
+      const rows = await db.execute(sql.raw(`
+        SELECT scope FROM public.oauth_authorization_codes
+        WHERE client_id = '${oauthClientId}'
+        ORDER BY created_at DESC LIMIT 1
+      `)) as unknown as any[];
+      expect(rows.length).toBe(1);
+      const storedScope = rows[0].scope as string;
+      expect(storedScope).toContain('profile:read');
+      expect(storedScope).toContain('memory:read');
+      expect(storedScope).toContain('memory:write');
+      expect(storedScope).not.toContain('tables');
+      expect(storedScope).not.toContain('vectors');
+      expect(storedScope).not.toContain('graph');
+
+      await deleteSession(tokenHash);
+    });
+
+    test('all resources set to none produces empty scope', async () => {
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = hashSessionToken(sessionToken);
+      await insertSession(testUser.userId, tokenHash, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+
+      const codeChallenge = crypto.createHash('sha256').update('none_verifier_pad_to_43chars!!!!!!').digest('base64url');
+      const getHeaders = new Headers();
+      getHeaders.set('Cookie', `epitome_session=${sessionToken}`);
+
+      const getUrl = `/v1/auth/oauth/authorize?client_id=${oauthClientId}&redirect_uri=${encodeURIComponent('https://localhost:3000/callback')}&code_challenge=${codeChallenge}&code_challenge_method=S256&response_type=code&scope=profile:read`;
+
+      const getResponse = await app.request(getUrl, { method: 'GET', headers: getHeaders });
+      const html = await getResponse.text();
+      const csrfMatch = html.match(/name="csrf_token"\s+value="([^"]+)"/);
+      const setCookieHeader = getResponse.headers.get('set-cookie') || '';
+      const csrfCookieMatch = setCookieHeader.match(/csrf_token=([^;]+)/);
+
+      const formBody = new URLSearchParams({
+        action: 'approve',
+        client_id: oauthClientId,
+        redirect_uri: 'https://localhost:3000/callback',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        state: '',
+        'perm_profile': 'none',
+        'perm_tables/*': 'none',
+        'perm_vectors/*': 'none',
+        'perm_graph': 'none',
+        'perm_memory': 'none',
+        csrf_token: csrfMatch![1]!,
+      });
+
+      const postHeaders = new Headers();
+      postHeaders.set('Content-Type', 'application/x-www-form-urlencoded');
+      postHeaders.set('Cookie', `epitome_session=${sessionToken}; csrf_token=${csrfCookieMatch![1]}`);
+
+      const postResponse = await app.request('/v1/auth/oauth/authorize', {
+        method: 'POST',
+        headers: postHeaders,
+        body: formBody.toString(),
+      });
+
+      // Should still redirect with auth code (empty scope is valid)
+      expect(postResponse.status).toBe(302);
+
+      const rows = await db.execute(sql.raw(`
+        SELECT scope FROM public.oauth_authorization_codes
+        WHERE client_id = '${oauthClientId}'
+        ORDER BY created_at DESC LIMIT 1
+      `)) as unknown as any[];
+      expect(rows.length).toBe(1);
+      expect(rows[0].scope).toBe('');
+
+      await deleteSession(tokenHash);
+    });
+
+    test('legacy scope field still works when no perm_* fields present', async () => {
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = hashSessionToken(sessionToken);
+      await insertSession(testUser.userId, tokenHash, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+
+      const codeChallenge = crypto.createHash('sha256').update('legacy_verifier_pad_to_43chars!!!!').digest('base64url');
+      const getHeaders = new Headers();
+      getHeaders.set('Cookie', `epitome_session=${sessionToken}`);
+
+      const getUrl = `/v1/auth/oauth/authorize?client_id=${oauthClientId}&redirect_uri=${encodeURIComponent('https://localhost:3000/callback')}&code_challenge=${codeChallenge}&code_challenge_method=S256&response_type=code&scope=profile:read`;
+
+      const getResponse = await app.request(getUrl, { method: 'GET', headers: getHeaders });
+      const html = await getResponse.text();
+      const csrfMatch = html.match(/name="csrf_token"\s+value="([^"]+)"/);
+      const setCookieHeader = getResponse.headers.get('set-cookie') || '';
+      const csrfCookieMatch = setCookieHeader.match(/csrf_token=([^;]+)/);
+
+      // Submit using the old scope field (no perm_* fields)
+      const formBody = new URLSearchParams({
+        action: 'approve',
+        client_id: oauthClientId,
+        redirect_uri: 'https://localhost:3000/callback',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        state: '',
+        scope: 'profile:read tables:write',
+        csrf_token: csrfMatch![1]!,
+      });
+
+      const postHeaders = new Headers();
+      postHeaders.set('Content-Type', 'application/x-www-form-urlencoded');
+      postHeaders.set('Cookie', `epitome_session=${sessionToken}; csrf_token=${csrfCookieMatch![1]}`);
+
+      const postResponse = await app.request('/v1/auth/oauth/authorize', {
+        method: 'POST',
+        headers: postHeaders,
+        body: formBody.toString(),
+      });
+
+      expect(postResponse.status).toBe(302);
+
+      const rows = await db.execute(sql.raw(`
+        SELECT scope FROM public.oauth_authorization_codes
+        WHERE client_id = '${oauthClientId}'
+        ORDER BY created_at DESC LIMIT 1
+      `)) as unknown as any[];
+      expect(rows.length).toBe(1);
+      expect(rows[0].scope).toBe('profile:read tables:write');
+
+      await deleteSession(tokenHash);
+    });
+  });
+
+  // ─── permFieldsToScopeString Unit Tests ────────────────────────────
+
+  describe('permFieldsToScopeString', () => {
+    test('all write produces full scope string', () => {
+      const result = permFieldsToScopeString({
+        'profile': 'write',
+        'tables/*': 'write',
+        'vectors/*': 'write',
+        'graph': 'write', // graph has no write scope, should only get read
+        'memory': 'write',
+      });
+      expect(result).toContain('profile:read');
+      expect(result).toContain('profile:write');
+      expect(result).toContain('tables:read');
+      expect(result).toContain('tables:write');
+      expect(result).toContain('vectors:read');
+      expect(result).toContain('vectors:write');
+      expect(result).toContain('graph:read');
+      expect(result).not.toContain('graph:write');
+      expect(result).toContain('memory:read');
+      expect(result).toContain('memory:write');
+    });
+
+    test('all read produces read-only scope string', () => {
+      const result = permFieldsToScopeString({
+        'profile': 'read',
+        'tables/*': 'read',
+        'vectors/*': 'read',
+        'graph': 'read',
+        'memory': 'read',
+      });
+      expect(result).toBe('profile:read tables:read vectors:read graph:read memory:read');
+    });
+
+    test('all none produces empty string', () => {
+      const result = permFieldsToScopeString({
+        'profile': 'none',
+        'tables/*': 'none',
+        'vectors/*': 'none',
+        'graph': 'none',
+        'memory': 'none',
+      });
+      expect(result).toBe('');
+    });
+
+    test('mixed permissions produce correct subset', () => {
+      const result = permFieldsToScopeString({
+        'profile': 'write',
+        'tables/*': 'none',
+        'vectors/*': 'read',
+        'graph': 'read',
+        'memory': 'none',
+      });
+      expect(result).toContain('profile:read');
+      expect(result).toContain('profile:write');
+      expect(result).toContain('vectors:read');
+      expect(result).toContain('graph:read');
+      expect(result).not.toContain('tables');
+      expect(result).not.toContain('memory');
     });
   });
 });
