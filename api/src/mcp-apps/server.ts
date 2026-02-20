@@ -1,7 +1,7 @@
 /**
  * ChatGPT Apps MCP Server Factory
  *
- * Creates a McpServer with all 9 Epitome tools registered using the service
+ * Creates a McpServer with all 10 Epitome tools registered using the service
  * layer and chatgptAdapter for response formatting. Tool annotations provide
  * readOnlyHint/destructiveHint/openWorldHint metadata for ChatGPT.
  *
@@ -44,7 +44,7 @@ function wrapTool<T>(
 }
 
 /**
- * Create a ChatGPT Apps MCP server with all 9 tools.
+ * Create a ChatGPT Apps MCP server with all 10 tools.
  * Each request gets its own server instance (stateless mode).
  */
 export function createChatGptMcpServer(): McpServer {
@@ -145,6 +145,15 @@ export function createChatGptMcpServer(): McpServer {
     },
     annotations: TOOL_ANNOTATIONS.review_memories,
   }, wrapTool(tools.reviewMemories));
+
+  server.registerTool('retrieve_user_knowledge', {
+    description: 'Retrieve everything Epitome knows about a topic. Searches across all data sources (profile, tables, vector memories, knowledge graph) in parallel and returns fused, deduplicated facts with provenance. Use this instead of manually calling list_tables + search_memory + query_graph. Budget controls depth: "small" (fast, 15 facts max), "medium" (default, 40 facts), "deep" (thorough, 80 facts).',
+    inputSchema: {
+      topic: z.string().min(1).max(500).describe('Topic to retrieve knowledge about'),
+      budget: z.enum(['small', 'medium', 'deep']).optional().describe('Retrieval depth (default: "medium")'),
+    },
+    annotations: TOOL_ANNOTATIONS.retrieve_user_knowledge,
+  }, wrapTool(tools.retrieveUserKnowledge));
 
   return server;
 }

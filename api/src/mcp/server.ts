@@ -1,7 +1,7 @@
 /**
  * Epitome MCP Server
  *
- * Model Context Protocol server exposing 9 tools for AI agents
+ * Model Context Protocol server exposing 10 tools for AI agents
  * Simplified HTTP-based implementation without SDK transport layer
  *
  * Architecture:
@@ -22,6 +22,7 @@ import { searchMemory } from './tools/searchMemory.js';
 import { saveMemory } from './tools/saveMemory.js';
 import { queryGraph } from './tools/queryGraph.js';
 import { reviewMemories } from './tools/reviewMemories.js';
+import { retrieveUserKnowledge } from './tools/retrieveUserKnowledge.js';
 
 /**
  * MCP Server Context
@@ -47,6 +48,7 @@ const TOOLS = {
   save_memory: saveMemory,
   query_graph: queryGraph,
   review_memories: reviewMemories,
+  retrieve_user_knowledge: retrieveUserKnowledge,
 };
 
 /**
@@ -283,6 +285,25 @@ IMPORTANT: Keep each column value atomic. Put the dish/exercise/item NAME in the
           },
         },
         required: ['action'],
+      },
+    },
+    {
+      name: 'retrieve_user_knowledge',
+      description: `Retrieve everything Epitome knows about a topic. Searches across all data sources (profile, tables, vector memories, knowledge graph) in parallel and returns fused, deduplicated facts with provenance. Use this instead of manually calling list_tables + search_memory + query_graph. Budget controls depth: "small" (fast, 15 facts max), "medium" (default, 40 facts), "deep" (thorough, 80 facts).`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          topic: {
+            type: 'string',
+            description: 'Topic to retrieve knowledge about (e.g., "food preferences", "workout history", "Alex")',
+          },
+          budget: {
+            type: 'string',
+            enum: ['small', 'medium', 'deep'],
+            description: 'Retrieval depth: "small" (fast, 15 facts), "medium" (default, 40), "deep" (thorough, 80)',
+          },
+        },
+        required: ['topic'],
       },
     },
   ];

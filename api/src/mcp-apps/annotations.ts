@@ -14,4 +14,5 @@ export const TOOL_ANNOTATIONS: Record<string, {
   update_profile:   { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   add_record:       { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   save_memory:      { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  retrieve_user_knowledge: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
 };
