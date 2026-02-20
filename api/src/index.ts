@@ -88,6 +88,11 @@ if (process.env.CHATGPT_MCP_ENABLED === 'true') {
   app.route('/chatgpt-mcp', createChatGptMcpRoutes());
 }
 
+// OpenAI domain verification
+app.get('/.well-known/openai-apps-challenge', (c) => {
+  return c.text('VPiLo0lkzcy7bQGsi0awiX0S-TcGALw1cvfyF1c0b80');
+});
+
 // OAuth 2.0 discovery + MCP OAuth flow
 app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata);
 app.get('/.well-known/oauth-authorization-server', oauthDiscovery);
