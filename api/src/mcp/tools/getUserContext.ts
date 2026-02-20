@@ -11,6 +11,7 @@ import { getLatestProfile } from '@/services/profile.service';
 import { listTables } from '@/services/table.service';
 import { listCollections } from '@/services/vector.service';
 import { withUserSchema } from '@/db/client';
+import { logger } from '@/utils/logger';
 import type { McpContext } from '../server.js';
 
 interface GetUserContextArgs {
@@ -39,7 +40,15 @@ export async function getUserContext(args: GetUserContextArgs, context: McpConte
   const { userId, agentId } = context;
 
   // Consent check — profile is required (primary purpose of this tool)
-  await requireConsent(userId, agentId, 'profile', 'read');
+  try {
+    await requireConsent(userId, agentId, 'profile', 'read');
+  } catch (error) {
+    logger.error('getUserContext: top-level consent failed', {
+      userId, agentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 
   // Audit log
   await logAuditEntry(userId, {
@@ -58,14 +67,24 @@ export async function getUserContext(args: GetUserContextArgs, context: McpConte
   try {
     await requireConsent(userId, agentId, 'tables', 'read');
     tables = await listTables(userId);
-  } catch { /* no tables consent — return empty */ }
+  } catch (error) {
+    logger.warn('getUserContext: section failed', {
+      section: 'tables', userId, agentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   // Vector collections — only if agent has vectors consent
   let collections: Awaited<ReturnType<typeof listCollections>> = [];
   try {
     await requireConsent(userId, agentId, 'vectors', 'read');
     collections = await listCollections(userId);
-  } catch { /* no vectors consent — return empty */ }
+  } catch (error) {
+    logger.warn('getUserContext: section failed', {
+      section: 'collections', userId, agentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   // Graph entities — only if agent has graph consent
   let topEntities: Array<{ type: string; name: string; properties: Record<string, unknown>; confidence: number; mentionCount: number }> = [];
@@ -100,7 +119,12 @@ export async function getUserContext(args: GetUserContextArgs, context: McpConte
         mentionCount: row.mention_count,
       }));
     });
-  } catch { /* no graph consent — return empty */ }
+  } catch (error) {
+    logger.warn('getUserContext: section failed', {
+      section: 'graph', userId, agentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   // Recent memories/vectors — only if agent has vectors consent
   let recentMemories: Array<{ collection: string; text: string; metadata: Record<string, unknown>; confidence: number | null; status: string | null; createdAt: Date }> = [];
@@ -132,7 +156,12 @@ export async function getUserContext(args: GetUserContextArgs, context: McpConte
         createdAt: row.created_at,
       }));
     });
-  } catch { /* no vectors consent — return empty */ }
+  } catch (error) {
+    logger.warn('getUserContext: section failed', {
+      section: 'vectors', userId, agentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   return {
     profile: profile?.data || null,

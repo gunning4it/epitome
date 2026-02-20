@@ -8,24 +8,27 @@ const {
   mockInitialize,
   mockPaymentMiddlewareFromHTTPServer,
   mockRegisterExactEvmScheme,
+  mockHTTPFacilitatorClient,
 } = vi.hoisted(() => {
   const mockInitialize = vi.fn().mockResolvedValue(undefined);
   const mockPaymentMiddlewareFromHTTPServer = vi.fn().mockReturnValue(
     vi.fn(async (_c: unknown, next: () => Promise<void>) => next())
   );
   const mockRegisterExactEvmScheme = vi.fn();
+  const mockHTTPFacilitatorClient = vi.fn();
 
   return {
     mockInitialize,
     mockPaymentMiddlewareFromHTTPServer,
     mockRegisterExactEvmScheme,
+    mockHTTPFacilitatorClient,
   };
 });
 
 vi.mock('@x402/core/server', () => ({
   x402ResourceServer: function() {},
   x402HTTPResourceServer: function() { this.initialize = mockInitialize; },
-  HTTPFacilitatorClient: function() {},
+  HTTPFacilitatorClient: mockHTTPFacilitatorClient,
 }));
 
 vi.mock('@x402/evm/exact/server', () => ({
@@ -47,6 +50,7 @@ vi.mock('@/utils/logger', () => ({
 
 // Import after mocks
 import { x402Service } from '@/services/x402.service';
+import { logger } from '@/utils/logger';
 
 // =====================================================
 // Helpers
@@ -72,18 +76,20 @@ describe('X402Service', () => {
   beforeEach(() => {
     x402Service._reset();
     vi.clearAllMocks();
-    // Clean x402 env vars
+    // Clean x402 + CDP env vars
     delete process.env.X402_ENABLED;
     delete process.env.X402_PAY_TO_ADDRESS;
     delete process.env.X402_NETWORK;
     delete process.env.X402_FACILITATOR_URL;
     delete process.env.X402_PRICE_PER_CALL;
+    delete process.env.CDP_API_KEY_ID;
+    delete process.env.CDP_API_KEY_SECRET;
   });
 
   afterEach(() => {
     // Restore original env
     for (const key of Object.keys(process.env)) {
-      if (key.startsWith('X402_')) delete process.env[key];
+      if (key.startsWith('X402_') || key.startsWith('CDP_')) delete process.env[key];
     }
     Object.assign(process.env, originalEnv);
   });
@@ -164,6 +170,52 @@ describe('X402Service', () => {
       expect(status.reason).toContain('ECONNREFUSED');
       expect(x402Service.getMiddleware()).toBeNull();
     });
+
+    it('should be degraded on unknown network without explicit facilitator URL', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'eip155:999999',
+      });
+
+      await x402Service.initialize();
+
+      const status = x402Service.getStatus();
+      expect(status.status).toBe('degraded');
+      expect(status.reason).toContain('Unknown network "eip155:999999"');
+      expect(status.reason).toContain('Set X402_FACILITATOR_URL explicitly');
+    });
+
+    it('should be degraded on partial CDP credentials (only key ID)', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'eip155:8453',
+        CDP_API_KEY_ID: 'key-id-only',
+      });
+
+      await x402Service.initialize();
+
+      const status = x402Service.getStatus();
+      expect(status.status).toBe('degraded');
+      expect(status.reason).toContain('Partial CDP credentials');
+      expect(status.reason).toContain('both CDP_API_KEY_ID and CDP_API_KEY_SECRET are required');
+    });
+
+    it('should be degraded on partial CDP credentials (only secret)', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'eip155:8453',
+        CDP_API_KEY_SECRET: 'secret-only',
+      });
+
+      await x402Service.initialize();
+
+      const status = x402Service.getStatus();
+      expect(status.status).toBe('degraded');
+      expect(status.reason).toContain('Partial CDP credentials');
+    });
   });
 
   describe('ready state', () => {
@@ -189,6 +241,153 @@ describe('X402Service', () => {
       await x402Service.initialize();
 
       expect(x402Service.getStatus().status).toBe('ready');
+    });
+  });
+
+  describe('facilitator auto-selection', () => {
+    it('should auto-select CDP facilitator for mainnet (eip155:8453)', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'eip155:8453',
+      });
+
+      await x402Service.initialize();
+
+      expect(x402Service.getStatus().status).toBe('ready');
+      expect(mockHTTPFacilitatorClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+        })
+      );
+    });
+
+    it('should auto-select x402.org for testnet (eip155:84532)', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'eip155:84532',
+      });
+
+      await x402Service.initialize();
+
+      expect(x402Service.getStatus().status).toBe('ready');
+      expect(mockHTTPFacilitatorClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'https://x402.org/facilitator',
+        })
+      );
+    });
+
+    it('should normalize alias "base" to eip155:8453 and select CDP', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'base',
+      });
+
+      await x402Service.initialize();
+
+      expect(x402Service.getStatus().status).toBe('ready');
+      expect(mockHTTPFacilitatorClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+        })
+      );
+    });
+
+    it('should normalize alias "base-sepolia" to eip155:84532 and select x402.org', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'base-sepolia',
+      });
+
+      await x402Service.initialize();
+
+      expect(x402Service.getStatus().status).toBe('ready');
+      expect(mockHTTPFacilitatorClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'https://x402.org/facilitator',
+        })
+      );
+    });
+
+    it('should use explicit X402_FACILITATOR_URL when set', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'eip155:84532',
+        X402_FACILITATOR_URL: 'https://custom-facilitator.example.com',
+      });
+
+      await x402Service.initialize();
+
+      expect(x402Service.getStatus().status).toBe('ready');
+      expect(mockHTTPFacilitatorClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'https://custom-facilitator.example.com',
+        })
+      );
+    });
+
+    it('should warn on known-bad override (x402.org + mainnet)', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'eip155:8453',
+        X402_FACILITATOR_URL: 'https://x402.org/facilitator',
+      });
+
+      await x402Service.initialize();
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('x402.org facilitator does not support mainnet')
+      );
+      // Should still attempt init (operator may know what they're doing)
+      expect(mockHTTPFacilitatorClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'https://x402.org/facilitator',
+        })
+      );
+    });
+  });
+
+  describe('CDP auth headers', () => {
+    it('should pass auth headers when both CDP credentials are set', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'eip155:8453',
+        CDP_API_KEY_ID: 'my-key-id',
+        CDP_API_KEY_SECRET: 'my-key-secret',
+      });
+
+      await x402Service.initialize();
+
+      expect(x402Service.getStatus().status).toBe('ready');
+      const config = mockHTTPFacilitatorClient.mock.calls[0][0];
+      expect(config.createAuthHeaders).toBeTypeOf('function');
+
+      // Verify the auth headers function returns correct format
+      const headers = await config.createAuthHeaders();
+      expect(headers.verify).toEqual({ Authorization: 'Bearer my-key-id' });
+      expect(headers.settle).toEqual({ Authorization: 'Bearer my-key-id' });
+      expect(headers.supported).toEqual({ Authorization: 'Bearer my-key-id' });
+    });
+
+    it('should not pass auth headers when no CDP credentials are set', async () => {
+      setEnv({
+        X402_ENABLED: 'true',
+        X402_PAY_TO_ADDRESS: '0x1234567890abcdef',
+        X402_NETWORK: 'eip155:8453',
+      });
+
+      await x402Service.initialize();
+
+      expect(x402Service.getStatus().status).toBe('ready');
+      const config = mockHTTPFacilitatorClient.mock.calls[0][0];
+      expect(config.createAuthHeaders).toBeUndefined();
     });
   });
 

@@ -207,7 +207,10 @@ The x402 protocol enables AI agents to pay for individual MCP tool calls using c
 | X402_ENABLED | false | Enable x402 payment support |
 | X402_PAY_TO_ADDRESS | — | Wallet address to receive payments |
 | X402_PRICE_PER_CALL | 0.01 | Price per MCP call in USDC |
-| X402_NETWORK | base-sepolia | Network: `base-sepolia` or `base` |
+| X402_NETWORK | eip155:84532 | Network: `eip155:84532` (Base Sepolia) or `eip155:8453` (Base mainnet). Aliases: `base-sepolia`, `base` |
+| X402_FACILITATOR_URL | (auto) | Facilitator URL. Auto-selected: x402.org (testnet) or CDP (mainnet). Override for custom facilitators |
+| CDP_API_KEY_ID | — | CDP API key ID (required for mainnet CDP facilitator) |
+| CDP_API_KEY_SECRET | — | CDP API key secret (required for mainnet CDP facilitator) |
 
 ---
 

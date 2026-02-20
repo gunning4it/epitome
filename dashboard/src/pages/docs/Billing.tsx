@@ -178,7 +178,11 @@ export default function Billing() {
         code={`X402_ENABLED=true
 X402_PAY_TO_ADDRESS=0xYourAddress
 X402_PRICE_PER_CALL=0.01
-X402_NETWORK=base-sepolia  # or "base" for mainnet`}
+X402_NETWORK=eip155:84532            # Base Sepolia testnet (alias: "base-sepolia")
+# X402_NETWORK=eip155:8453           # Base mainnet (alias: "base")
+# X402_FACILITATOR_URL=              # Auto-selected: x402.org (testnet) or CDP (mainnet)
+# CDP_API_KEY_ID=                    # Required for mainnet CDP facilitator
+# CDP_API_KEY_SECRET=                # Required for mainnet CDP facilitator`}
       />
 
       {/* Section 6: Billing API Endpoints */}

@@ -94,10 +94,11 @@ describe('x402 Middleware Integration', () => {
   });
 
   describe('x402 degraded', () => {
-    it('should return 503 JSON-RPC error when x402 is enabled but degraded', async () => {
+    it('should fail open when x402 is enabled but degraded (free-tier still served)', async () => {
       mockIsEnabled.mockReturnValue(true);
       mockGetMiddleware.mockReturnValue(null); // degraded — no middleware available
       mockInitialize.mockResolvedValue(undefined); // init runs but still no middleware
+      mockGetStatus.mockReturnValue({ status: 'degraded', reason: 'Facilitator error' });
 
       const headers = createTestAuthHeaders(testUser);
       const response = await app.request(MCP_PATH, {
@@ -106,11 +107,9 @@ describe('x402 Middleware Integration', () => {
         body: mcpBody(),
       });
 
-      expect(response.status).toBe(503);
-      const body = await response.json() as any;
-      expect(body.jsonrpc).toBe('2.0');
-      expect(body.error.code).toBe(-32000);
-      expect(body.error.message).toContain('Payment service temporarily unavailable');
+      // Fail open: request should reach MCP handler, not get blocked with 503
+      expect(response.status).not.toBe(503);
+      expect(response.status).not.toBe(402);
     });
   });
 
@@ -201,7 +200,7 @@ describe('x402 Middleware Integration', () => {
       expect(capturedX402Paid).toBe(true);
     });
 
-    it('should return 503 when middleware throws non-Response error', async () => {
+    it('should fail open when middleware throws non-Response error', async () => {
       const fakeMiddleware = vi.fn(async () => {
         throw new Error('Unexpected x402 error');
       });
@@ -216,9 +215,9 @@ describe('x402 Middleware Integration', () => {
         body: mcpBody(),
       });
 
-      expect(response.status).toBe(503);
-      const body = await response.json() as any;
-      expect(body.error.message).toContain('Payment service temporarily unavailable');
+      // Fail open: request should reach MCP handler, not get blocked with 503
+      expect(response.status).not.toBe(503);
+      expect(response.status).not.toBe(402);
     });
   });
 

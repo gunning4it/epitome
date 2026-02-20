@@ -122,11 +122,14 @@ export function createMcpRoutes(): Hono<HonoEnv> {
 
     const mw = x402Service.getMiddleware();
     if (!mw) {
-      // Fail closed: free-tier users cannot bypass payment when x402 middleware is unavailable
-      return c.json(
-        { jsonrpc: '2.0', error: { code: -32000, message: 'Payment service temporarily unavailable' }, id: null },
-        503
-      );
+      // Fail open: if x402 is degraded, let free-tier requests through without payment upgrade.
+      // They'll still hit normal rate limits — just won't get pay-per-call tier override.
+      const status = x402Service.getStatus();
+      logger.warn('x402: middleware unavailable, failing open for free-tier request', {
+        status: status.status,
+        reason: status.reason,
+      });
+      return next();
     }
 
     try {
@@ -143,12 +146,9 @@ export function createMcpRoutes(): Hono<HonoEnv> {
     } catch (err) {
       // If x402 verification fails, the middleware itself returns 402
       if (err instanceof Response) throw err;
-      // Fail closed: free-tier users cannot bypass payment on x402 errors
-      logger.error('x402: middleware error, denying free-tier request', { error: String(err) });
-      return c.json(
-        { jsonrpc: '2.0', error: { code: -32000, message: 'Payment service temporarily unavailable' }, id: null },
-        503
-      );
+      // Fail open: x402 runtime errors shouldn't block free-tier requests
+      logger.error('x402: middleware error, failing open for free-tier request', { error: String(err) });
+      return next();
     }
   });
 
@@ -197,8 +197,21 @@ export function createMcpRoutes(): Hono<HonoEnv> {
     const userId = c.get('userId') as string | undefined;
     const agentId = (c.get('agentId') as string | undefined) || extractAgentId(c);
 
+    logger.info('MCP request received', {
+      method: c.req.method,
+      hasAuth: !!c.req.header('Authorization'),
+      userId: userId || null,
+      agentId,
+      userAgent: c.req.header('User-Agent')?.substring(0, 100),
+    });
+
     // M-4 SECURITY FIX: Require auth for ALL methods, not just POST
     if (!userId) {
+      logger.warn('MCP request rejected: no auth', {
+        method: c.req.method,
+        hasBearer: !!c.req.header('Authorization'),
+        hasCookie: !!c.req.header('Cookie'),
+      });
       const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
       c.header(
         'WWW-Authenticate',
@@ -225,9 +238,10 @@ export function createMcpRoutes(): Hono<HonoEnv> {
           extra: { userId: userId || '', agentId, tier: getEffectiveTier(c as any) },
         },
       });
+      logger.info('MCP request completed', { userId, agentId, status: response.status });
       return response;
     } catch (error) {
-      logger.error('MCP protocol error', { error: String(error) });
+      logger.error('MCP protocol error', { error: String(error), userId, agentId });
       return c.json(
         { jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null },
         500,

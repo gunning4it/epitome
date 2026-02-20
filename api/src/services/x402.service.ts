@@ -12,6 +12,63 @@ export type X402Status = 'disabled' | 'initializing' | 'ready' | 'degraded';
 
 const NETWORK_FORMAT = /^[a-z0-9]+:\d+$/;
 
+// Step 1: Human-friendly aliases → CAIP-2 format
+const NETWORK_ALIASES: Record<string, string> = {
+  'base-sepolia': 'eip155:84532',
+  'base': 'eip155:8453',
+  'ethereum-sepolia': 'eip155:11155111',
+  'ethereum': 'eip155:1',
+  'arbitrum-sepolia': 'eip155:421614',
+  'arbitrum': 'eip155:42161',
+};
+
+// Step 2: Explicit facilitator sets
+const TESTNET_NETWORKS = new Set([
+  'eip155:84532',    // Base Sepolia
+  'eip155:11155111', // Ethereum Sepolia
+  'eip155:421614',   // Arbitrum Sepolia
+]);
+
+const MAINNET_NETWORKS = new Set([
+  'eip155:8453',  // Base
+  'eip155:1',     // Ethereum
+  'eip155:42161', // Arbitrum
+]);
+
+const X402_ORG_FACILITATOR = 'https://x402.org/facilitator';
+const CDP_FACILITATOR = 'https://api.cdp.coinbase.com/platform/v2/x402';
+
+function normalizeNetwork(raw: string): string {
+  return NETWORK_ALIASES[raw] || raw;
+}
+
+function selectFacilitatorUrl(network: string): string | null {
+  if (TESTNET_NETWORKS.has(network)) return X402_ORG_FACILITATOR;
+  if (MAINNET_NETWORKS.has(network)) return CDP_FACILITATOR;
+  return null;
+}
+
+function buildCdpAuthHeaders(): (() => Promise<{
+  verify: Record<string, string>;
+  settle: Record<string, string>;
+  supported: Record<string, string>;
+}>) | undefined {
+  const keyId = process.env.CDP_API_KEY_ID;
+  const keySecret = process.env.CDP_API_KEY_SECRET;
+
+  if (!keyId && !keySecret) return undefined;
+
+  if (!keyId || !keySecret) {
+    // Partial credentials — caller should degrade
+    return undefined;
+  }
+
+  return async () => {
+    const headers = { Authorization: `Bearer ${keyId}` };
+    return { verify: headers, settle: headers, supported: headers };
+  };
+}
+
 class X402Service {
   private status: X402Status = 'disabled';
   private middleware: MiddlewareHandler | null = null;
@@ -41,10 +98,47 @@ class X402Service {
       return;
     }
 
-    const network = process.env.X402_NETWORK || 'eip155:84532';
+    // Step 1: Normalize aliases before validation
+    const network = normalizeNetwork(process.env.X402_NETWORK || 'eip155:84532');
     if (!NETWORK_FORMAT.test(network)) {
       this.status = 'degraded';
       this.degradedReason = `Invalid network format: "${network}" (expected "eip155:8453" style)`;
+      logger.error(`x402: ${this.degradedReason}`);
+      return;
+    }
+
+    // Step 2: Resolve facilitator URL
+    const explicitUrl = process.env.X402_FACILITATOR_URL;
+    let facilitatorUrl: string;
+
+    if (explicitUrl) {
+      facilitatorUrl = explicitUrl;
+
+      // Step 3: Warn on known-bad override
+      if (explicitUrl.includes('x402.org') && MAINNET_NETWORKS.has(network)) {
+        logger.warn(
+          `x402: WARNING — x402.org facilitator does not support mainnet networks. ` +
+          `Network "${network}" will likely fail with RouteConfigurationError. ` +
+          `Use CDP facilitator: ${CDP_FACILITATOR}`
+        );
+      }
+    } else {
+      const autoUrl = selectFacilitatorUrl(network);
+      if (!autoUrl) {
+        this.status = 'degraded';
+        this.degradedReason = `Unknown network "${network}" — cannot auto-select facilitator. Set X402_FACILITATOR_URL explicitly.`;
+        logger.error(`x402: ${this.degradedReason}`);
+        return;
+      }
+      facilitatorUrl = autoUrl;
+    }
+
+    // Step 4: Check CDP credentials for mainnet
+    const cdpKeyId = process.env.CDP_API_KEY_ID;
+    const cdpKeySecret = process.env.CDP_API_KEY_SECRET;
+    if ((cdpKeyId && !cdpKeySecret) || (!cdpKeyId && cdpKeySecret)) {
+      this.status = 'degraded';
+      this.degradedReason = 'Partial CDP credentials: both CDP_API_KEY_ID and CDP_API_KEY_SECRET are required';
       logger.error(`x402: ${this.degradedReason}`);
       return;
     }
@@ -57,9 +151,17 @@ class X402Service {
       const { registerExactEvmScheme } = await import('@x402/evm/exact/server');
       const { paymentMiddlewareFromHTTPServer } = await import('@x402/hono');
 
-      const facilitatorClient = new HTTPFacilitatorClient({
-        url: process.env.X402_FACILITATOR_URL || 'https://x402.org/facilitator',
-      });
+      const facilitatorConfig: { url: string; createAuthHeaders?: () => Promise<{ verify: Record<string, string>; settle: Record<string, string>; supported: Record<string, string> }> } = {
+        url: facilitatorUrl,
+      };
+
+      // Step 4: Wire up CDP auth headers
+      const authHeaders = buildCdpAuthHeaders();
+      if (authHeaders) {
+        facilitatorConfig.createAuthHeaders = authHeaders;
+      }
+
+      const facilitatorClient = new HTTPFacilitatorClient(facilitatorConfig);
       const resourceServer = new x402ResourceServer(facilitatorClient);
       registerExactEvmScheme(resourceServer);
 
@@ -87,7 +189,7 @@ class X402Service {
       // syncFacilitatorOnStart=false — already initialized above
       this.middleware = paymentMiddlewareFromHTTPServer(httpServer, undefined, undefined, false);
       this.status = 'ready';
-      logger.info('x402: Payment middleware ready', { network, facilitator: process.env.X402_FACILITATOR_URL || 'https://x402.org/facilitator' });
+      logger.info('x402: Payment middleware ready', { network, facilitator: facilitatorUrl });
     } catch (err) {
       this.status = 'degraded';
       this.degradedReason = String(err);
