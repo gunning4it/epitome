@@ -119,6 +119,11 @@ export function createMcpProtocolServer(): McpServer {
         .optional()
         .describe('Optional topic for relevance ranking (e.g., "food preferences", "workout history")'),
     },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: true,
+    },
   }, async (args, extra) => callTool(getUserContext, args, extra, 'get_user_context'));
 
   // 2. update_profile
@@ -134,6 +139,11 @@ export function createMcpProtocolServer(): McpServer {
         .optional()
         .describe('Optional description of what changed (e.g., "user mentioned new allergy")'),
     },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      openWorldHint: true,
+    },
   }, async (args, extra) => callTool(updateProfile, args, extra, 'update_profile'));
 
   // 3. list_tables
@@ -141,6 +151,11 @@ export function createMcpProtocolServer(): McpServer {
     description:
       "List all data tables the user tracks (meals, workouts, expenses, habits, etc.). Returns table names, descriptions, column schemas, and record counts. Use this to discover what data is available before querying.",
     inputSchema: {},
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: true,
+    },
   }, async (args, extra) => callTool(listTables, args, extra, 'list_tables'));
 
   // 4. query_table
@@ -161,6 +176,11 @@ export function createMcpProtocolServer(): McpServer {
       limit: z.number().optional().describe('Maximum number of results to return (default 50, max 1000)'),
       offset: z.number().optional().describe('Number of results to skip for pagination'),
     },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: true,
+    },
   }, async (args, extra) => callTool(queryTable, args, extra, 'query_table'));
 
   // 5. add_record
@@ -175,6 +195,11 @@ export function createMcpProtocolServer(): McpServer {
         .describe('Record data as key-value pairs (e.g., {food: "pizza", calories: 800})'),
       tableDescription: z.string().optional().describe('Optional description of the table (used on first creation)'),
     },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: true,
+    },
   }, async (args, extra) => callTool(addRecord, args, extra, 'add_record'));
 
   // 6. search_memory
@@ -186,6 +211,11 @@ export function createMcpProtocolServer(): McpServer {
       query: z.string().describe('Search query text (will be embedded and compared to stored vectors)'),
       minSimilarity: z.number().optional().describe('Minimum cosine similarity threshold (0-1, default 0.7)'),
       limit: z.number().optional().describe('Maximum number of results to return (default 10)'),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: true,
     },
   }, async (args, extra) => callTool(searchMemory, args, extra, 'search_memory'));
 
@@ -200,6 +230,11 @@ export function createMcpProtocolServer(): McpServer {
         .record(z.string(), z.unknown())
         .optional()
         .describe('Optional metadata (e.g., {topic: "food", mood: "happy"})'),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: true,
     },
   }, async (args, extra) => callTool(saveMemory, args, extra, 'save_memory'));
 
@@ -227,6 +262,11 @@ export function createMcpProtocolServer(): McpServer {
         .optional()
         .describe('For pattern: either natural language string or structured criteria object'),
     },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: true,
+    },
   }, async (args, extra) => callTool(queryGraph, args, extra, 'query_graph'));
 
   // 9. review_memories
@@ -242,6 +282,11 @@ export function createMcpProtocolServer(): McpServer {
         .enum(['confirm', 'reject', 'keep_both'])
         .optional()
         .describe('For resolve: "confirm" to accept, "reject" to deny, "keep_both" to mark as contextual'),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      openWorldHint: true,
     },
   }, async (args, extra) => callTool(reviewMemories, args, extra, 'review_memories'));
 
