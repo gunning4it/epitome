@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
+import { ENTITY_DISPLAY, type EntityType } from '@/lib/ontology';
 import type { Entity, Edge } from '@/lib/types';
 
 interface GraphExplorerProps {
@@ -23,25 +24,11 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 }
 
 const ENTITY_COLORS: Record<string, string> = {
-  person: '#3b82f6',
-  place: '#10b981',
-  organization: '#8b5cf6',
-  event: '#f59e0b',
-  concept: '#06b6d4',
-  creative_work: '#ec4899',
-  product: '#f97316',
-  food: '#84cc16',
-  health: '#ef4444',
-  hobby: '#14b8a6',
-  skill: '#6366f1',
-  other: '#71717a',
-  // Legacy types kept for backwards compat
-  topic: '#6366f1',
-  preference: '#ec4899',
-  activity: '#14b8a6',
-  medication: '#ef4444',
-  media: '#a855f7',
-  custom: '#78716c',
+  ...(Object.fromEntries(
+    (Object.entries(ENTITY_DISPLAY) as [EntityType, { label: string; color: string }][]).map(
+      ([type, config]) => [type, config.color]
+    )
+  )),
   default: '#6b7280',
 };
 

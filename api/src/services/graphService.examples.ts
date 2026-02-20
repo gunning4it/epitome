@@ -168,7 +168,7 @@ async function recordRestaurantVisit() {
     origin: 'ai_inferred',
   });
 
-  console.log('Second visit deduped, weight incremented:', secondVisit.weight); // 1.5
+  console.log('Second visit deduped, weight incremented:', secondVisit?.weight); // 1.5
 }
 
 // =====================================================

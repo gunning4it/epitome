@@ -13,54 +13,13 @@
 
 import { withUserSchema, TransactionSql } from '@/db/client';
 import { Entity, Edge, MemoryMeta } from '@/db/schema';
-import { createMemoryMetaInternal, ORIGIN_CONFIDENCE } from './memoryQuality.service';
+import { createMemoryMetaInternal, ORIGIN_CONFIDENCE, registerContradictionInternal } from './memoryQuality.service';
 import { withTierLimitLock } from './metering.service';
+import { validateEdge, insertEdgeQuarantine, type EntityType } from './ontology';
+import { logger } from '@/utils/logger';
 
-// =====================================================
-// TYPES & CONSTANTS
-// =====================================================
-
-/**
- * Valid entity types (value domain from DATA_MODEL.md §7.1)
- */
-export const ENTITY_TYPES = [
-  'person',
-  'place',
-  'food',
-  'topic',
-  'preference',
-  'event',
-  'activity',
-  'medication',
-  'media',
-  'custom',
-] as const;
-
-export type EntityType = (typeof ENTITY_TYPES)[number];
-
-/**
- * Common edge relation types (value domain from DATA_MODEL.md §7.2)
- */
-export const EDGE_RELATIONS = [
-  'likes',
-  'dislikes',
-  'ate',
-  'visited',
-  'attended_by',
-  'located_at',
-  'married_to',
-  'works_at',
-  'takes',
-  'performed',
-  'category',
-  'related_to',
-  'thread_next',
-  'contradicts',
-  'interested_in',
-  'allergic_to',
-] as const;
-
-export type EdgeRelation = (typeof EDGE_RELATIONS)[number] | string;
+// Re-export ontology types for downstream consumers
+export { ENTITY_TYPES, EDGE_RELATIONS, ENTITY_DISPLAY, type EntityType, type EdgeRelation } from './ontology';
 
 /**
  * Entity creation input
@@ -107,7 +66,7 @@ export interface EntityFilters {
 export interface CreateEdgeInput {
   sourceId: number;
   targetId: number;
-  relation: EdgeRelation;
+  relation: string; // Validated at runtime via ontology.validateEdge()
   weight?: number;
   confidence?: number;
   evidence?: Array<Record<string, any>>;
@@ -127,7 +86,7 @@ export interface EdgeWithMeta extends Edge {
  * Edge update input
  */
 export interface UpdateEdgeInput {
-  relation?: EdgeRelation;
+  relation?: string;
   weight?: number;
   confidence?: number;
   evidence?: Array<Record<string, any>>;
@@ -143,7 +102,7 @@ export interface EdgeFilters {
   sourceIds?: number[];
   targetIds?: number[];
   entityIds?: number[];
-  relation?: EdgeRelation;
+  relation?: string;
   limit?: number;
   offset?: number;
   includeDeleted?: boolean;
@@ -154,7 +113,7 @@ export interface EdgeFilters {
  */
 export interface NeighborOptions {
   direction?: 'outbound' | 'inbound' | 'both';
-  relationFilter?: EdgeRelation;
+  relationFilter?: string;
   confidenceMin?: number;
   limit?: number;
 }
@@ -488,7 +447,14 @@ export async function updateEntity(
     // Merge properties if provided (deep merge)
     const newProperties = updates.properties
       ? { ...existing.properties, ...updates.properties }
-      : existing.properties;
+      : { ...existing.properties };
+
+    // Preserve old name as alias when renaming (same pattern as mergeEntities)
+    if (updates.name && updates.name !== existing.name) {
+      const aliases = new Set<string>(newProperties.aliases || []);
+      aliases.add(existing.name);
+      newProperties.aliases = Array.from(aliases);
+    }
 
     // Update entity
     await tx<Entity[]>`
@@ -703,7 +669,7 @@ export async function getEntityByName(
 export async function createEdge(
   userId: string,
   input: CreateEdgeInput
-): Promise<EdgeWithMeta> {
+): Promise<EdgeWithMeta | null> {
   return withUserSchema(userId, async (tx) => {
     // Validate that source and target entities exist
     const [source, target] = await Promise.all([
@@ -716,6 +682,54 @@ export async function createEdge(
     }
     if (!target) {
       throw new Error(`NOT_FOUND: Target entity ${input.targetId} not found`);
+    }
+
+    // --- RELATION MATRIX VALIDATION (ontology enforcement) ---
+    const validation = validateEdge(
+      source.type as EntityType,
+      target.type as EntityType,
+      input.relation
+    );
+    if (!validation.valid) {
+      if (validation.quarantine) {
+        await insertEdgeQuarantine(tx, {
+          sourceType: source.type,
+          targetType: target.type,
+          relation: input.relation,
+          sourceName: source.name,
+          targetName: target.name,
+          reason: validation.error || 'Unknown relation',
+          payload: { sourceId: input.sourceId, targetId: input.targetId, properties: input.properties },
+        });
+        logger.info('Edge quarantined', { relation: input.relation, source: source.name, target: target.name, reason: validation.error });
+        return null;
+      }
+      logger.warn('Edge validation failed', { ...validation, sourceId: input.sourceId, targetId: input.targetId });
+      return null;
+    }
+
+    // --- TEMPORAL TRANSITION for works_at ---
+    // Save old edges info before marking them non-current (for contradiction detection)
+    let oldWorksAtEdges: Array<{ id: number; target_name: string; meta_id: number | null }> = [];
+    if (input.relation === 'works_at') {
+      oldWorksAtEdges = await tx.unsafe<Array<{ id: number; target_name: string; meta_id: number | null }>>(`
+        SELECT e.id, ent.name AS target_name, mm.id AS meta_id
+        FROM edges e
+        JOIN entities ent ON ent.id = e.target_id
+        LEFT JOIN memory_meta mm ON mm.source_ref = 'edge:' || e.id
+        WHERE e.source_id = $1 AND e.relation = 'works_at' AND e.target_id != $2
+          AND e._deleted_at IS NULL
+          AND (e.properties->>'is_current')::boolean IS NOT FALSE
+      `, [input.sourceId, input.targetId]);
+
+      await tx.unsafe(`
+        UPDATE edges SET
+          properties = jsonb_set(COALESCE(properties, '{}'), '{is_current}', 'false'),
+          last_seen = NOW()
+        WHERE source_id = $1 AND relation = 'works_at' AND target_id != $2
+          AND _deleted_at IS NULL
+          AND (properties->>'is_current')::boolean IS NOT FALSE
+      `, [input.sourceId, input.targetId]);
     }
 
     // Check for existing edge (same source, target, relation)
@@ -835,6 +849,33 @@ export async function createEdge(
     const [meta] = await tx<MemoryMeta[]>`
       SELECT * FROM memory_meta WHERE id = ${metaId}
     `.execute();
+
+    // --- CONTRADICTION DETECTION for works_at job changes ---
+    if (input.relation === 'works_at' && oldWorksAtEdges.length > 0) {
+      for (const oldEdge of oldWorksAtEdges) {
+        if (oldEdge.meta_id) {
+          try {
+            await registerContradictionInternal(tx, {
+              oldMetaId: oldEdge.meta_id,
+              newMetaId: metaId,
+              field: 'works_at',
+              oldValue: oldEdge.target_name,
+              newValue: target.name,
+              agent: input.agentSource || 'system',
+            });
+            logger.info('Registered works_at contradiction', {
+              oldTarget: oldEdge.target_name,
+              newTarget: target.name,
+            });
+          } catch (err) {
+            logger.warn('Failed to register works_at contradiction', {
+              oldEdgeId: oldEdge.id,
+              error: String(err),
+            });
+          }
+        }
+      }
+    }
 
     return {
       ...edge,
@@ -1214,8 +1255,8 @@ export interface GraphPath {
  */
 export interface TraversalOptions {
   maxDepth?: number;
-  relationFilter?: EdgeRelation | EdgeRelation[];
-  entityTypeFilter?: EntityType | EntityType[];
+  relationFilter?: string | string[];
+  entityTypeFilter?: string | string[];
   confidenceMin?: number;
   limit?: number;
 }
@@ -1673,17 +1714,19 @@ export async function queryPattern(
     }
 
     // Pattern 3: "where do I [verb]?"
-    // Example: "where do I run?" → find place entities connected via 'performed' relation
+    // Example: "where do I run?" → find place entities connected via place relations
     const whereMatch = lowerPattern.match(/where (?:do|does) (?:i|we) (\w+)\??/);
     if (whereMatch) {
       const verb = whereMatch[1]; // 'run'
 
-      // Map verb to relation
+      // Map verb to valid ontology relation (person → place)
       const relationMap: Record<string, string> = {
-        run: 'performed',
+        run: 'visited',
         work: 'works_at',
         eat: 'visited',
         shop: 'visited',
+        exercise: 'works_out_at',
+        gym: 'works_out_at',
       };
       const relation = relationMap[verb] || 'visited';
 

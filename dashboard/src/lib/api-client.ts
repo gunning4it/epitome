@@ -161,7 +161,14 @@ export const graphApi = {
         targetId: number;
       }>;
     }>(`/graph/entities/${id}/neighbors`).then((res) =>
-      res.neighbors.map((neighbor) => neighbor.entity)
+      res.neighbors.map((neighbor) => ({
+        ...neighbor.entity,
+        edge: {
+          relation: neighbor.relation,
+          weight: neighbor.weight,
+          confidence: neighbor.edgeConfidence,
+        },
+      }))
     ),
   updateEntity: (id: string, data: Partial<Pick<Entity, 'name' | 'properties'>>) =>
     apiCall(`/graph/entities/${id}`, {

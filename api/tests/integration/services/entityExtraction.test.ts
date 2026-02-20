@@ -301,7 +301,7 @@ describe('extractEntitiesRuleBased', () => {
         age: 34,
       },
       edge: {
-        relation: 'wife',
+        relation: 'married_to',
       },
     });
 
@@ -313,7 +313,7 @@ describe('extractEntitiesRuleBased', () => {
         age: 8,
       },
       edge: {
-        relation: 'son',
+        relation: 'family_member',
       },
     });
   });
@@ -972,7 +972,7 @@ describe('family member preference extraction (rule-based)', () => {
       name: 'Sarah',
       type: 'person',
       properties: { relation: 'wife' },
-      edge: { relation: 'wife' },
+      edge: { relation: 'married_to' },
     });
     expect(entities[0].edge?.sourceRef).toBeUndefined();
 
@@ -1020,7 +1020,7 @@ describe('family member preference extraction (rule-based)', () => {
     expect(entities[0]).toMatchObject({
       name: 'Sarah',
       type: 'person',
-      edge: { relation: 'wife' },
+      edge: { relation: 'married_to' },
     });
 
     expect(entities[1]).toMatchObject({
@@ -1193,7 +1193,7 @@ describe('family member preference extraction (rule-based)', () => {
     expect(entities[0]).toMatchObject({
       name: 'Sarah',
       type: 'person',
-      edge: { relation: 'wife' },
+      edge: { relation: 'married_to' },
     });
   });
 
@@ -1221,24 +1221,24 @@ describe('family member preference extraction (rule-based)', () => {
     expect(entities[0]).toMatchObject({
       name: 'Brianna Gunning',
       type: 'person',
-      edge: { relation: 'wife' },
+      edge: { relation: 'married_to' },
     });
 
-    // Lauren with owner → mother_in_law edge (for discoverability)
+    // Lauren with owner → family_member edge (for discoverability)
     expect(entities[1]).toMatchObject({
       name: 'Lauren',
       type: 'person',
       properties: { relation: 'mother', nickname: 'Moo Moo' },
-      edge: { relation: 'mother_in_law', weight: 1.0 },
+      edge: { relation: 'family_member', weight: 1.0 },
     });
     expect(entities[1].edge?.sourceRef).toBeUndefined();
 
-    // Lauren with Brianna → mother edge (sourceRef)
+    // Lauren with Brianna → family_member edge (sourceRef)
     expect(entities[2]).toMatchObject({
       name: 'Lauren',
       type: 'person',
       edge: {
-        relation: 'mother',
+        relation: 'family_member',
         sourceRef: { name: 'Brianna Gunning', type: 'person' },
       },
     });
@@ -1377,7 +1377,7 @@ describe('family member preference extraction (rule-based)', () => {
     // Lauren connected to Brianna via sourceRef
     const laurenFromBrianna = laurenEntries.find(e => e.edge?.sourceRef?.name === 'Brianna Gunning');
     expect(laurenFromBrianna).toBeDefined();
-    expect(laurenFromBrianna?.edge?.relation).toBe('mother');
+    expect(laurenFromBrianna?.edge?.relation).toBe('family_member');
 
     // Owner food preferences still work
     const breakfastBurritos = entities.find(e => e.name === 'breakfast burritos' && e.type === 'food');
@@ -1426,10 +1426,10 @@ describe('extractEntitiesFromRecord sourceRef resolution (integration)', () => {
     expect(edges).toHaveLength(1);
     expect(edges[0].source_id).toBe(sarah[0].id);
 
-    // Edge from owner → Sarah with relation 'wife'
+    // Edge from owner → Sarah with relation 'married_to'
     const wifeEdges = await pgSql.unsafe<{ source_id: number; target_id: number; relation: string }[]>(`
       SELECT source_id, target_id, relation FROM edges
-      WHERE target_id = ${sarah[0].id} AND relation = 'wife'
+      WHERE target_id = ${sarah[0].id} AND relation = 'married_to'
     `);
     expect(wifeEdges).toHaveLength(1);
     // The source should be the owner entity, NOT Sarah
@@ -1934,10 +1934,10 @@ describe('in-law relationship labels (rule-based)', () => {
       e => e.name === 'Lauren' && !e.edge?.sourceRef
     );
     expect(laurenOwnerEdge).toBeDefined();
-    expect(laurenOwnerEdge?.edge?.relation).toBe('mother_in_law');
+    expect(laurenOwnerEdge?.edge?.relation).toBe('family_member');
   });
 
-  it('should label wife.father as father_in_law', () => {
+  it('should label wife.father as family_member', () => {
     const record = {
       id: 1,
       family: {
@@ -1956,10 +1956,10 @@ describe('in-law relationship labels (rule-based)', () => {
       e => e.name === 'Robert' && !e.edge?.sourceRef
     );
     expect(robertOwnerEdge).toBeDefined();
-    expect(robertOwnerEdge?.edge?.relation).toBe('father_in_law');
+    expect(robertOwnerEdge?.edge?.relation).toBe('family_member');
   });
 
-  it('should label husband.sister as sister_in_law', () => {
+  it('should label husband.sister as family_member', () => {
     const record = {
       id: 1,
       family: {
@@ -1978,10 +1978,10 @@ describe('in-law relationship labels (rule-based)', () => {
       e => e.name === 'Emily' && !e.edge?.sourceRef
     );
     expect(emilyOwnerEdge).toBeDefined();
-    expect(emilyOwnerEdge?.edge?.relation).toBe('sister_in_law');
+    expect(emilyOwnerEdge?.edge?.relation).toBe('family_member');
   });
 
-  it('should label husband.brother as brother_in_law', () => {
+  it('should label husband.brother as family_member', () => {
     const record = {
       id: 1,
       family: {
@@ -2000,7 +2000,7 @@ describe('in-law relationship labels (rule-based)', () => {
       e => e.name === 'Dave' && !e.edge?.sourceRef
     );
     expect(daveOwnerEdge).toBeDefined();
-    expect(daveOwnerEdge?.edge?.relation).toBe('brother_in_law');
+    expect(daveOwnerEdge?.edge?.relation).toBe('family_member');
   });
 
   it('should keep family_member for non-spouse nested members', () => {

@@ -53,14 +53,21 @@ export interface EntityCandidate {
  * Normalize an entity name for comparison.
  *
  * - Lowercase
+ * - Strip corporate suffixes for organizations (Inc., LLC, Corp., etc.)
  * - Strip trailing plural suffixes: s, es, ies→y
  * - Trim whitespace
  *
  * @param name - Entity name to normalize
+ * @param type - Optional entity type for type-specific normalization
  * @returns Normalized form
  */
-export function normalizeForComparison(name: string): string {
+export function normalizeForComparison(name: string, type?: string): string {
   let n = name.toLowerCase().trim();
+
+  // Strip corporate suffixes for organizations
+  if (type === 'organization') {
+    n = n.replace(/,?\s*\b(inc\.?|llc|corp\.?|corporation|ltd\.?|co\.?|company)\s*$/i, '').trim();
+  }
 
   // ies → y (e.g., "burritos" won't match, but "berries" → "berry")
   if (n.endsWith('ies')) {
@@ -90,7 +97,7 @@ async function findNormalizedMatch(
   userId: string,
   candidate: EntityCandidate
 ): Promise<DuplicateMatch | null> {
-  const normalizedCandidate = normalizeForComparison(candidate.name);
+  const normalizedCandidate = normalizeForComparison(candidate.name, candidate.type);
 
   return withUserSchema(userId, async (tx) => {
     // Fetch up to 200 entities of same type, ordered by mention_count DESC
@@ -104,7 +111,7 @@ async function findNormalizedMatch(
     `;
 
     for (const entity of entities) {
-      const normalizedExisting = normalizeForComparison(entity.name);
+      const normalizedExisting = normalizeForComparison(entity.name, candidate.type);
 
       // Check normalized exact match
       if (normalizedCandidate === normalizedExisting) {
@@ -208,6 +215,7 @@ async function findFuzzyMatch(
   userId: string,
   candidate: EntityCandidate
 ): Promise<DuplicateMatch | null> {
+  // Invariant: fuzzy match is type-constrained — prevents cross-type dedup
   return withUserSchema(userId, async (tx) => {
     const result = await tx<{ id: number; similarity: number; confidence: number }[]>`
       SELECT

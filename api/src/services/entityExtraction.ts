@@ -11,10 +11,12 @@
  */
 
 import { withUserSchema, sql as pgSql } from '@/db/client';
-import { createEntity, createEdge, getEntityByName, type CreateEntityInput, type CreateEdgeInput, type EntityType } from './graphService';
+import { createEntity, createEdge, getEntityByName, type CreateEntityInput, type CreateEdgeInput } from './graphService';
+import { ENTITY_TYPES, type EntityType } from './ontology';
 import { checkAndDeduplicateBeforeCreate, type EntityCandidate } from './deduplication';
 import { getLatestProfile } from './profile.service';
 import { softCheckLimit } from './metering.service';
+import { syncEntityToProfile } from './profileSync.service';
 import { logger } from '@/utils/logger';
 
 // =====================================================
@@ -148,7 +150,7 @@ export function parseFoodDescription(raw: string): ParsedFoodDescription {
  */
 export interface ExtractedEntity {
   name: string;
-  type: 'person' | 'place' | 'food' | 'topic' | 'preference' | 'event' | 'activity' | 'medication' | 'media' | 'custom';
+  type: EntityType;
   properties?: Record<string, any>;
   // Optional edge to create from user to this entity
   edge?: {
@@ -232,6 +234,13 @@ export async function buildExtractionContext(userId: string): Promise<Extraction
           if (m.name) parts.push(`${m.relation || 'family'}: ${m.name}`);
         }
       }
+      // Work/career context
+      const pdata = profile.data as Record<string, any>;
+      const workCompany = pdata.career?.primary_job?.company || pdata.work?.company;
+      const workRole = pdata.career?.primary_job?.title || pdata.work?.role;
+      if (workCompany) parts.push(`Company: ${workCompany}`);
+      if (workRole) parts.push(`Role: ${workRole}`);
+
       if (parts.length > 0) profileSummary = parts.join('; ');
     }
   } catch (err) {
@@ -271,7 +280,7 @@ export async function buildExtractionContext(userId: string): Promise<Extraction
  * Pure function — assembles sections conditionally.
  */
 export function buildContextAwarePrompt(context: ExtractionContext): string {
-  let prompt = `You are the entity extraction engine for a personal knowledge graph. Extract people, places, foods, topics, preferences, events, activities, medications, and media from the user's data.
+  let prompt = `You are the entity extraction engine for a personal knowledge graph. Extract people, organizations, places, foods, topics, preferences, events, activities, medications, and media from the user's data.
 
 Return JSON matching the required schema. Each entity needs name, type, properties, and edge (or null).
 
@@ -361,6 +370,14 @@ const KNOWN_MEMBER_KEYS = new Set([
  * - Flat string/boolean preference entities with sourceRef
  * - Nested family members (e.g., wife.mother) recursively
  */
+// Map raw family role names (wife, mother, etc.) to valid ontology edge relations.
+// The original role is preserved in edge.properties.family_role.
+const SPOUSE_ROLE_SET = new Set(['wife', 'husband', 'spouse', 'partner']);
+function mapFamilyRoleToRelation(role: string): string {
+  if (SPOUSE_ROLE_SET.has(role)) return 'married_to';
+  return 'family_member';
+}
+
 function extractFamilyMemberEntities(
   member: Record<string, any>,
   relation: string,
@@ -381,8 +398,9 @@ function extractFamilyMemberEntities(
       ...(member.nickname ? { nickname: member.nickname } : {}),
     },
     edge: {
-      relation: relation || 'family_member',
+      relation: mapFamilyRoleToRelation(relation),
       weight: 1.0,
+      properties: { family_role: relation },
     },
   });
 
@@ -471,30 +489,21 @@ function extractFamilyMemberEntities(
       const nestedEntities = extractFamilyMemberEntities(value, key);
 
       if (nestedEntities.length > 0 && nestedEntities[0].type === 'person') {
-        // Compute owner → nested relationship (e.g., wife's mother = mother-in-law)
-        const SPOUSE_RELATIONS = new Set(['wife', 'husband', 'spouse', 'partner']);
-        const IN_LAW_MAP: Record<string, string> = {
-          mother: 'mother_in_law', father: 'father_in_law',
-          sister: 'sister_in_law', brother: 'brother_in_law',
-        };
-        let ownerRelation = 'family_member';
-        if (SPOUSE_RELATIONS.has(relation) && IN_LAW_MAP[key]) {
-          ownerRelation = IN_LAW_MAP[key];
-        }
-
         // Add an owner → nested member edge so they're discoverable
+        // All nested family connections use 'family_member' with specific role in properties
         entities.push({
           name: nestedEntities[0].name,
           type: 'person',
           properties: nestedEntities[0].properties,
-          edge: { relation: ownerRelation, weight: 1.0 },
+          edge: { relation: 'family_member', weight: 1.0, properties: { family_role: key } },
         });
 
         // Change the recursive person entry's edge to parent → nested (sourceRef)
         nestedEntities[0].edge = {
-          relation: key,
+          relation: mapFamilyRoleToRelation(key),
           weight: 1.0,
           sourceRef: memberRef,
+          properties: { family_role: key },
         };
       }
 
@@ -577,6 +586,12 @@ function inferGenericEntityType(tableName: string, path: string[]): EntityType {
   if (/(family|wife|husband|spouse|partner|daughter|son|mother|father|friend|member|nickname|name)/.test(joined)) {
     return 'person';
   }
+  if (/(work|company|employer|organization|org|corporation|firm|business|workplace)/.test(joined)) {
+    return 'organization';
+  }
+  if (/(school|university|college|institute|academy|education)/.test(joined)) {
+    return 'organization';
+  }
   if (/(gym|location|city|state|country|address|place|home|house|restaurant|cafe|beach|park)/.test(joined)) {
     return 'place';
   }
@@ -588,6 +603,9 @@ function inferGenericEntityType(tableName: string, path: string[]): EntityType {
   }
   if (/(medication|dose|drug|prescription)/.test(joined)) {
     return 'medication';
+  }
+  if (/(skill|expertise|proficiency|competency)/.test(joined)) {
+    return 'topic';
   }
   if (/(goal|preference|plan|likes|loves|dislikes|avoid|condition|health)/.test(joined)) {
     return 'preference';
@@ -605,10 +623,13 @@ function inferGenericRelation(path: string[], entityType: EntityType): string {
   if (/(dislike|avoid|allerg)/.test(joined)) return 'dislikes';
   if (/(condition|diagnosis)/.test(joined)) return 'has_condition';
   if (/(goal|target|plan)/.test(joined)) return 'tracks';
+  if (entityType === 'organization' && /(work|company|employer)/.test(joined)) return 'works_at';
+  if (entityType === 'organization' && /(school|university|education)/.test(joined)) return 'attended';
   if (entityType === 'medication') return 'takes';
   if (entityType === 'place' && /gym/.test(joined)) return 'works_out_at';
-  if (entityType === 'person' && relationFromFamily) return relationFromFamily;
+  if (entityType === 'person' && relationFromFamily) return mapFamilyRoleToRelation(relationFromFamily);
   if (entityType === 'person') return 'knows';
+  if (/(skill|expertise)/.test(joined)) return 'has_skill';
   if (entityType === 'activity') return 'likes';
   if (entityType === 'food') return 'likes';
   if (entityType === 'topic') return 'interested_in';
@@ -761,7 +782,8 @@ function dedupeExtractedEntities(entities: ExtractedEntity[]): ExtractedEntity[]
   const result: ExtractedEntity[] = [];
 
   for (const entity of entities) {
-    const key = `${entity.type}:${entity.name.toLowerCase()}:${entity.edge?.relation || ''}`;
+    const sourceRefKey = entity.edge?.sourceRef ? `:ref:${entity.edge.sourceRef.name}` : '';
+    const key = `${entity.type}:${entity.name.toLowerCase()}:${entity.edge?.relation || ''}${sourceRefKey}`;
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(entity);
@@ -1007,6 +1029,71 @@ const EXTRACTION_RULES: Record<string, (data: Record<string, unknown>) => Extrac
       }
     }
 
+    // Extract work/career data → organization entity + works_at edge with role qualifier
+    const workCompany = (data.career as any)?.primary_job?.company || (data.work as any)?.company;
+    const workRole = (data.career as any)?.primary_job?.title || (data.work as any)?.role;
+
+    if (workCompany && typeof workCompany === 'string') {
+      entities.push({
+        name: workCompany,
+        type: 'organization',
+        properties: { category: 'employer' },
+        edge: {
+          relation: 'works_at',
+          weight: 1.0,
+          properties: {
+            role: workRole || undefined,
+            is_current: true,
+          },
+        },
+      });
+    }
+
+    // Extract education → organization entity + attended edge
+    if (data.education && typeof data.education === 'object') {
+      const edu = data.education as Record<string, any>;
+      if (edu.institution && typeof edu.institution === 'string') {
+        entities.push({
+          name: edu.institution,
+          type: 'organization',
+          properties: {
+            category: 'education',
+            ...(edu.degree ? { degree: edu.degree } : {}),
+            ...(edu.field ? { field: edu.field } : {}),
+          },
+          edge: { relation: 'attended', weight: 1.0 },
+        });
+      }
+    }
+
+    // Extract interests → activity entities + interested_in edges
+    if (Array.isArray(data.interests)) {
+      for (const interest of data.interests as unknown[]) {
+        if (typeof interest === 'string') {
+          entities.push({
+            name: interest,
+            type: 'activity',
+            properties: { category: 'interest' },
+            edge: { relation: 'interested_in', weight: 1.0 },
+          });
+        }
+      }
+    }
+
+    // Extract skills → topic entities + has_skill edges
+    if (Array.isArray(data.skills)) {
+      for (const skill of data.skills as unknown[]) {
+        if (typeof skill === 'string') {
+          entities.push({
+            name: skill,
+            type: 'topic',
+            properties: { category: 'skill' },
+            edge: { relation: 'has_skill', weight: 1.0 },
+          });
+        }
+      }
+    }
+
     // Extract social connections (friends, colleagues, etc.)
     if (data.social && typeof data.social === 'object') {
       const social = data.social as Record<string, any>;
@@ -1128,12 +1215,12 @@ export async function extractEntitiesLLM(
     userPrompt = buildUserPrompt(tableName, record);
   } else {
     // Legacy generic path (backward compat for tests, batch jobs without userId)
-    systemPrompt = `You are an entity extraction system. Extract entities (people, places, foods, topics, preferences, events, activities, medications, media) and their relationships from structured data.
+    systemPrompt = `You are an entity extraction system. Extract entities (people, organizations, places, foods, topics, preferences, events, activities, medications, media) and their relationships from structured data.
 
 Return JSON array of entities with this schema:
 [{
   "name": "entity name",
-  "type": "person|place|food|topic|preference|event|activity|medication|media|custom",
+  "type": "${[...ENTITY_TYPES].join('|')}",
   "properties": { additional metadata },
   "edge": {
     "relation": "likes|dislikes|ate|visited|performed|takes|interested_in|allergic_to|etc",
@@ -1178,7 +1265,7 @@ Extract entities and relationships:`;
                     type: 'object',
                     properties: {
                       name: { type: 'string' },
-                      type: { type: 'string', enum: ['person', 'place', 'food', 'topic', 'preference', 'event', 'activity', 'medication', 'media', 'custom'] },
+                      type: { type: 'string', enum: [...ENTITY_TYPES] },
                       properties: { type: 'object', additionalProperties: false },
                       edge: {
                         type: ['object', 'null'],
@@ -1343,7 +1430,7 @@ Return JSON only, no explanation:
                     type: 'object',
                     properties: {
                       name: { type: 'string' },
-                      type: { type: 'string', enum: ['person', 'place', 'food', 'topic', 'preference', 'event', 'activity', 'medication', 'media', 'custom'] },
+                      type: { type: 'string', enum: [...ENTITY_TYPES] },
                     },
                     required: ['name', 'type'],
                     additionalProperties: false,
@@ -1471,8 +1558,10 @@ Return JSON only, no explanation:
             agentSource: 'inter_entity_edges',
           };
 
-          await createEdge(userId, edgeInput);
-          result.edges.push({ sourceId, targetId, relation: edge.relation, weight: edge.weight ?? 0.8 });
+          const created = await createEdge(userId, edgeInput);
+          if (created) {
+            result.edges.push({ sourceId, targetId, relation: edge.relation, weight: edge.weight ?? 0.8 });
+          }
         } catch (error) {
           logger.error('Error creating inter-entity edge', {
             source: edge.source_name,
@@ -1927,13 +2016,28 @@ export async function extractEntitiesFromRecord(
             {
               table: tableName,
               row_id: record.id,
+              method: methodUsed,
+              extracted_at: new Date().toISOString(),
             },
           ],
           origin: methodUsed === 'rule_based' ? 'ai_pattern' : 'ai_inferred',
           agentSource: 'entity_extraction',
         };
 
-        await createEdge(userId, edgeInput);
+        const createdEdge = await createEdge(userId, edgeInput);
+        if (!createdEdge) {
+          logger.info('Edge skipped (quarantined or rejected)', {
+            entity: extracted.name,
+            relation: extracted.edge.relation,
+          });
+        } else if (!extracted.edge.sourceRef && ['works_at', 'attended'].includes(extracted.edge.relation)) {
+          // Fire-and-forget: sync entity data to profile
+          void syncEntityToProfile(userId, {
+            name: extracted.name, type: extracted.type, properties: extracted.properties,
+          }, extracted.edge.relation, extracted.edge.properties || {}, true).catch(err =>
+            logger.warn('Profile sync failed', { error: String(err) })
+          );
+        }
       }
     } catch (error) {
       logger.error('Error creating entity', { entityName: extracted.name, error: String(error) });

@@ -118,6 +118,21 @@ beforeAll(async () => {
     ON edges(source_id, target_id, relation)
   `.execute();
 
+  // Create edge_quarantine table (for ontology-rejected edges)
+  await pgSql`
+    CREATE TABLE IF NOT EXISTS edge_quarantine (
+      id SERIAL PRIMARY KEY,
+      source_type VARCHAR(50) NOT NULL,
+      target_type VARCHAR(50) NOT NULL,
+      relation VARCHAR(100) NOT NULL,
+      source_name VARCHAR(500),
+      target_name VARCHAR(500),
+      reason TEXT,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `.execute();
+
   await pgSql`RESET search_path`.execute();
 });
 
@@ -984,21 +999,21 @@ describe('Advanced Graph Queries', () => {
       await createEdge(TEST_USER_ID, {
         sourceId: italianId,
         targetId: bobId,
-        relation: 'liked_by',
+        relation: 'related_to',
         weight: 1.5,
       });
 
       await createEdge(TEST_USER_ID, {
         sourceId: bobId,
         targetId: charlieId,
-        relation: 'friends_with',
+        relation: 'friend',
         weight: 3.0,
       });
 
       await createEdge(TEST_USER_ID, {
         sourceId: charlieId,
         targetId: daveId,
-        relation: 'works_with',
+        relation: 'knows',
         weight: 1.0,
       });
     });
@@ -1064,7 +1079,7 @@ describe('Advanced Graph Queries', () => {
       await createEdge(TEST_USER_ID, {
         sourceId: daveId,
         targetId: lowConf.id,
-        relation: 'maybe_knows',
+        relation: 'knows',
         confidence: 0.2, // Below threshold
       });
 
@@ -1244,7 +1259,7 @@ describe('Advanced Graph Queries', () => {
       await createEdge(TEST_USER_ID, {
         sourceId: aliceId,
         targetId: lowConf.id,
-        relation: 'maybe_knows',
+        relation: 'knows',
         confidence: 0.2,
       });
 
@@ -1350,11 +1365,11 @@ describe('Advanced Graph Queries', () => {
         relation: 'likes',
       });
 
-      // Alice runs at Bestia
+      // Alice visits Bestia
       await createEdge(TEST_USER_ID, {
         sourceId: aliceId,
         targetId: bestiaId,
-        relation: 'performed',
+        relation: 'visited',
       });
     });
 
