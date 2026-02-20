@@ -228,7 +228,7 @@ export default function Graph() {
                   <div>
                     <div className="text-sm font-medium text-foreground mb-2">Evidence</div>
                     <div className="space-y-1 text-sm">
-                      {selectedEntity.properties?.origin && (
+                      {Boolean(selectedEntity.properties?.origin) && (
                         <div>
                           <span className="text-muted-foreground">Source:</span>{' '}
                           <span className="text-foreground">{String(selectedEntity.properties.origin)}</span>
