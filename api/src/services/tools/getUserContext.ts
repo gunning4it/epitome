@@ -98,17 +98,17 @@ function buildSuggestedTools(
   const suggestions: string[] = [];
   if (collections.length > 0) {
     const names = collections.map((c) => c.name).join(', ');
-    suggestions.push(`search_memory — user has ${collections.length} vector collection(s): ${names}`);
+    suggestions.push(`recall — user has ${collections.length} vector collection(s): ${names}`);
   }
   if (topEntities.length > 0) {
-    suggestions.push(`query_graph — user has ${topEntities.length} entities in knowledge graph`);
+    suggestions.push(`recall — user has ${topEntities.length} entities in knowledge graph`);
   }
   if (tables.length > 0) {
     const names = tables.map((t) => t.name).join(', ');
-    suggestions.push(`query_table — user has ${tables.length} table(s): ${names}`);
+    suggestions.push(`recall — user has ${tables.length} table(s): ${names}`);
   }
   if (collections.length === 0 && topEntities.length === 0 && tables.length === 0) {
-    suggestions.push('save_memory — no data yet, start by saving information the user shares');
+    suggestions.push('memorize — no data yet, start by saving information the user shares');
   }
   return suggestions;
 }
@@ -136,7 +136,7 @@ export async function getUserContext(
           hasStructuredData: false,
           hasMemories: false,
           hasGraphData: false,
-          suggestedTools: ['save_memory — no data yet, start by saving information the user shares'],
+          suggestedTools: ['memorize — no data yet, start by saving information the user shares'],
         },
       },
       'User context retrieved (limited — no profile consent).',
