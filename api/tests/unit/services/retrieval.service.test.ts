@@ -289,7 +289,7 @@ describe('retrieval.service', () => {
   // buildRetrievalPlan
   // ---------------------------------------------------
   describe('buildRetrievalPlan()', () => {
-    it('always includes retrieve_user_knowledge as first recommended call', () => {
+    it('always includes recall as first recommended call', () => {
       const intent = classifyIntent('anything');
       const scoredSources = [
         { sourceType: 'table' as const, sourceId: 'meals', relevanceScore: 0.9, reason: 'match' },
@@ -299,10 +299,10 @@ describe('retrieval.service', () => {
 
       expect(plan.recommendedCalls).toBeDefined();
       expect(plan.recommendedCalls.length).toBeGreaterThan(0);
-      expect(plan.recommendedCalls[0].tool).toBe('retrieve_user_knowledge');
+      expect(plan.recommendedCalls[0].tool).toBe('recall');
     });
 
-    it('recommends search_memory for high-scoring vector source', () => {
+    it('recommends recall for high-scoring vector source', () => {
       const intent = classifyIntent('memories');
       const scoredSources = [
         { sourceType: 'vector' as const, sourceId: 'general', relevanceScore: 0.8, reason: 'match' },
@@ -310,13 +310,13 @@ describe('retrieval.service', () => {
 
       const plan = buildRetrievalPlan(intent, scoredSources);
 
-      const hasSearchMemory = plan.recommendedCalls.some(
-        (call) => call.tool === 'search_memory'
+      const hasRecall = plan.recommendedCalls.some(
+        (call) => call.tool === 'recall'
       );
-      expect(hasSearchMemory).toBe(true);
+      expect(hasRecall).toBe(true);
     });
 
-    it('recommends query_table for high-scoring table source', () => {
+    it('recommends recall for high-scoring table source', () => {
       const intent = classifyIntent('meals data');
       const scoredSources = [
         { sourceType: 'table' as const, sourceId: 'meals', relevanceScore: 0.9, reason: 'match' },
@@ -324,13 +324,13 @@ describe('retrieval.service', () => {
 
       const plan = buildRetrievalPlan(intent, scoredSources);
 
-      const hasQueryTable = plan.recommendedCalls.some(
-        (call) => call.tool === 'query_table'
+      const hasRecall = plan.recommendedCalls.some(
+        (call) => call.tool === 'recall'
       );
-      expect(hasQueryTable).toBe(true);
+      expect(hasRecall).toBe(true);
     });
 
-    it('recommends query_graph for high-scoring graph source', () => {
+    it('recommends recall for high-scoring graph source', () => {
       const intent = classifyIntent('relationships');
       const scoredSources = [
         { sourceType: 'graph' as const, sourceId: 'graph', relevanceScore: 0.8, reason: 'match' },
@@ -338,10 +338,10 @@ describe('retrieval.service', () => {
 
       const plan = buildRetrievalPlan(intent, scoredSources);
 
-      const hasQueryGraph = plan.recommendedCalls.some(
-        (call) => call.tool === 'query_graph'
+      const hasRecall = plan.recommendedCalls.some(
+        (call) => call.tool === 'recall'
       );
-      expect(hasQueryGraph).toBe(true);
+      expect(hasRecall).toBe(true);
     });
 
     it('returns a plan object with recommendedCalls array', () => {

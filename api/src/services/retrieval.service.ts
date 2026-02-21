@@ -314,7 +314,7 @@ export function buildRetrievalPlan(
 
   // Always recommend the federated retrieval tool as primary
   recommendedCalls.push({
-    tool: 'retrieve_user_knowledge',
+    tool: 'recall',
     args: { topic: '<user_topic>', budget: 'medium' },
     reason: 'Single call that searches all data sources in parallel',
   });
@@ -324,22 +324,22 @@ export function buildRetrievalPlan(
     switch (source.sourceType) {
       case 'vector':
         recommendedCalls.push({
-          tool: 'search_memory',
-          args: { query: '<user_topic>', collection: source.sourceId },
+          tool: 'recall',
+          args: { topic: '<user_topic>' },
           reason: source.reason,
         });
         break;
       case 'table':
         recommendedCalls.push({
-          tool: 'query_table',
-          args: { table: source.sourceId, sql: `SELECT * FROM "${source.sourceId}" LIMIT 10` },
+          tool: 'recall',
+          args: { topic: '<user_topic>' },
           reason: source.reason,
         });
         break;
       case 'graph':
         recommendedCalls.push({
-          tool: 'query_graph',
-          args: { queryType: 'pattern', pattern: '<user_topic>' },
+          tool: 'recall',
+          args: { topic: '<user_topic>' },
           reason: source.reason,
         });
         break;
