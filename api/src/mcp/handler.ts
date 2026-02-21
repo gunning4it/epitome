@@ -271,18 +271,20 @@ export function createMcpRoutes(): Hono<HonoEnv> {
   app.post('/call/:toolName', async (c) => {
     const toolName = c.req.param('toolName');
 
-    // M-1: Validate toolName against known tool names
-    const knownTools = getToolDefinitions().map((t) => t.name);
-    if (!knownTools.includes(toolName)) {
-      return c.json(
-        { success: false, error: { code: 'BAD_REQUEST', message: `Unknown tool: ${toolName}` } },
-        400
-      );
-    }
-
     try {
-      // Build MCP context from auth middleware
+      // Build MCP context from auth middleware (runs before tool validation
+      // so unauthenticated requests get 401, not a tool-enumeration signal)
       const context = buildMcpContext(c);
+
+      // M-1: Validate toolName against known tool names
+      const knownTools = getToolDefinitions().map((t) => t.name);
+      if (!knownTools.includes(toolName)) {
+        return c.json(
+          { success: false, error: { code: 'NOT_FOUND', message: `Unknown tool: ${toolName}` } },
+          404
+        );
+      }
+
       const args = await c.req.json();
 
       // M-1: Validate request body is a plain object (not array, not primitive)

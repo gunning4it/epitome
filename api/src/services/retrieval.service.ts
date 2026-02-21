@@ -332,7 +332,7 @@ export function buildRetrievalPlan(
       case 'table':
         recommendedCalls.push({
           tool: 'recall',
-          args: { mode: 'table', table: { table: source.sourceId, sql: `SELECT * FROM "${source.sourceId}" WHERE text ILIKE '%<user_topic>%'` } },
+          args: { mode: 'table', table: { table: source.sourceId, filters: {}, limit: 20 } },
           reason: source.reason,
         });
         break;

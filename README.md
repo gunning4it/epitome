@@ -89,7 +89,7 @@ claude mcp add --transport http --header "Authorization: Bearer YOUR_API_KEY" ep
 
 For self-hosted, replace `https://epitome.fyi` with `http://localhost:3000`.
 
-Epitome exposes **9 MCP tools** — profile read/write, memory search, table CRUD, knowledge graph queries, and more. See the [full tool reference](https://epitome.fyi/docs/mcp-tools).
+Epitome exposes **3 MCP tools** — recall, memorize, and review. See the [full tool reference](https://epitome.fyi/docs/mcp-tools).
 
 ---
 
@@ -177,7 +177,7 @@ See [EPITOME_TECH_SPEC.md](EPITOME_TECH_SPEC.md) for the full architecture.
 
 - [Quick Start](https://epitome.fyi/docs/quickstart) — Get running in 60 seconds
 - [API Reference](https://epitome.fyi/docs/api) — REST endpoint documentation
-- [MCP Tools](https://epitome.fyi/docs/mcp-tools) — All 9 MCP tools explained
+- [MCP Tools](https://epitome.fyi/docs/mcp-tools) — All 3 MCP tools explained
 - [Architecture](EPITOME_TECH_SPEC.md) — Full technical specification
 - [Data Model](EPITOME_DATA_MODEL.md) — Every table, column, and constraint
 - [Self-Hosting Guide](https://epitome.fyi/docs/self-hosting) — Docker Compose deployment

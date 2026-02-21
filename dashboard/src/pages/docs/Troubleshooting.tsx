@@ -132,7 +132,7 @@ curl -X POST http://localhost:3000/mcp \\
           <p className="text-sm text-muted-foreground mb-3">
             <strong className="text-foreground">Fix:</strong> Open the Epitome dashboard, go to the Agents page,
             find the agent, and grant the required permissions (e.g., "vectors: read_write" for
-            store_memory and search_memory).
+            recall (memory mode) and memorize (memory storage)).
           </p>
         </div>
 
@@ -146,24 +146,24 @@ curl -X POST http://localhost:3000/mcp \\
           </p>
           <p className="text-sm text-muted-foreground mb-3">
             <strong className="text-foreground">Fix:</strong> Verify the tool name matches exactly (e.g.,
-            <code className="text-foreground bg-muted px-1 rounded">store_memory</code>, not <code className="text-foreground bg-muted px-1 rounded">storeMemory</code>).
+            <code className="text-foreground bg-muted px-1 rounded">memorize</code>, not <code className="text-foreground bg-muted px-1 rounded">Memorize</code>).
             Restart the agent to refresh its tool list. The available tools are:
-            read_profile, update_profile, query_table, insert_record, search_memory, store_memory,
-            query_graph, get_entity_neighbors, log_activity.
+            recall, memorize, review.
           </p>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-5">
           <h4 className="text-sm font-semibold text-foreground mb-2">
-            Agent sees empty results from search_memory
+            Agent sees empty results from recall
           </h4>
           <p className="text-sm text-muted-foreground mb-3">
             If search returns empty results when you know there are stored memories, the issue
             may be the similarity threshold or the embedding model configuration.
           </p>
           <p className="text-sm text-muted-foreground mb-3">
-            <strong className="text-foreground">Fix:</strong> Lower the <code className="text-foreground bg-muted px-1 rounded">min_similarity</code> parameter
-            (try 0.2 or 0.1). Verify that the <code className="text-foreground bg-muted px-1 rounded">OPENAI_EMBEDDING_MODEL</code> environment
+            <strong className="text-foreground">Fix:</strong> Lower the minimum similarity using memory mode:
+            <code className="text-foreground bg-muted px-1 rounded">recall({'{'} mode: "memory", memory: {'{'} minSimilarity: 0.2 {'}'} {'}'})</code>.
+            Verify that the <code className="text-foreground bg-muted px-1 rounded">OPENAI_EMBEDDING_MODEL</code> environment
             variable matches the model used to create the embeddings. If you changed models,
             existing embeddings will not match new queries.
           </p>
@@ -229,10 +229,10 @@ await withUserSchema(userId, async (tx) => {
 
         <div className="rounded-lg border border-border bg-card p-5">
           <h4 className="text-sm font-semibold text-foreground mb-2">
-            High latency on store_memory calls
+            High latency on memorize calls
           </h4>
           <p className="text-sm text-muted-foreground mb-3">
-            The <code className="text-foreground bg-muted px-1 rounded">store_memory</code> tool generates an embedding
+            The <code className="text-foreground bg-muted px-1 rounded">memorize</code> tool generates an embedding
             via the OpenAI API, which adds 200-400ms of latency. Entity extraction runs
             asynchronously and does not affect response time.
           </p>

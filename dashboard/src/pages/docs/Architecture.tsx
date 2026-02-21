@@ -201,13 +201,13 @@ async function getProfile(userId: string) {
 
       <h2 id="entity-extraction" className="text-xl font-semibold mt-10 mb-4">Entity Extraction Pipeline</h2>
       <p className="text-muted-foreground mb-4">
-        When a memory is stored via <code className="text-foreground bg-muted px-1 rounded">store_memory</code> or
+        When a memory is stored via <code className="text-foreground bg-muted px-1 rounded">memorize</code> or
         the vectors API, the system triggers an asynchronous entity extraction pipeline. The API
         returns immediately — extraction happens in the background.
       </p>
       <CodeBlock
         language="text"
-        code={`1. Memory Stored (store_memory / POST /v1/vectors/:collection)
+        code={`1. Memory Stored (memorize / POST /v1/vectors/:collection)
    │
    ▼
 2. Content embedded (text-embedding-3-small) → vector stored in pgvector
@@ -254,7 +254,7 @@ async function getProfile(userId: string) {
         language="text"
         code={`AI Agent (e.g., Claude Desktop)
   │
-  │  MCP tool call: store_memory({content: "...", collection: "facts"})
+  │  MCP tool call: memorize({text: "...", category: "facts", data: {...}})
   │  Transport: Streamable HTTP POST to /mcp
   │
   ▼
@@ -268,7 +268,7 @@ Hono Server
   │      └── If no: return RATE_LIMITED error
   │
   ▼
-MCP Tool Handler (store_memory)
+MCP Tool Handler (memorize)
   │
   ├── 5. Validate arguments with Zod schema
   ├── 6. Call VectorService.store(userId, content, collection, metadata)
@@ -278,7 +278,7 @@ Vector Service
   │
   ├── 7. Generate embedding via OpenAI text-embedding-3-small
   ├── 8. withUserSchema(userId) → INSERT into vector_entries
-  ├── 9. Log activity: {agent_id, action: "store_memory", details: {...}}
+  ├── 9. Log activity: {agent_id, action: "memorize", details: {...}}
   ├── 10. Trigger async entity extraction (non-blocking)
   │
   ▼

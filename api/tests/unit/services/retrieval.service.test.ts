@@ -332,8 +332,8 @@ describe('retrieval.service', () => {
       expect(tableCall).toBeDefined();
       expect(tableCall!.tool).toBe('recall');
       expect(tableCall!.args.table.table).toBe('meals');
-      expect(tableCall!.args.table.sql).toContain('meals');
-      expect(tableCall!.args.table.sql).toContain('<user_topic>');
+      expect(tableCall!.args.table.filters).toEqual({});
+      expect(tableCall!.args.table.limit).toBe(20);
     });
 
     it('recommends recall mode:graph for high-scoring graph source', () => {

@@ -177,7 +177,7 @@ function ApiKeyResult({ apiKey, agentName, onDone }: {
     },
   }, null, 2);
 
-  const curlSnippet = `curl -X POST ${API_BASE_URL}/mcp/call/get_user_context \\
+  const curlSnippet = `curl -X POST ${API_BASE_URL}/mcp/call/recall \\
   -H "Authorization: Bearer ${apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{}'`;
@@ -186,11 +186,9 @@ function ApiKeyResult({ apiKey, agentName, onDone }: {
 Auth Header: Authorization: Bearer ${apiKey}
 
 GET  /mcp/tools                    - List all tools
-POST /mcp/call/get_user_context    - Load profile + context
-POST /mcp/call/add_record          - Insert data
-POST /mcp/call/save_memory         - Save a memory
-POST /mcp/call/search_memory       - Semantic search
-POST /mcp/call/query_graph         - Graph traversal`;
+POST /mcp/call/recall       - Search or load context
+POST /mcp/call/memorize     - Save or delete data
+POST /mcp/call/review       - Manage contradictions`;
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onDone(); }}>
@@ -366,7 +364,7 @@ function AgentCard({ agent }: { agent: AgentWithConsent }) {
       },
     },
   }, null, 2);
-  const curlSnippet = `curl -X POST ${API_BASE_URL}/mcp/call/get_user_context \\
+  const curlSnippet = `curl -X POST ${API_BASE_URL}/mcp/call/recall \\
   -H "Authorization: Bearer ${placeholder}" \\
   -H "Content-Type: application/json" \\
   -d '{}'`;
@@ -374,11 +372,9 @@ function AgentCard({ agent }: { agent: AgentWithConsent }) {
 Auth Header: Authorization: Bearer ${placeholder}
 
 GET  /mcp/tools                    - List all tools
-POST /mcp/call/get_user_context    - Load profile + context
-POST /mcp/call/add_record          - Insert data
-POST /mcp/call/save_memory         - Save a memory
-POST /mcp/call/search_memory       - Semantic search
-POST /mcp/call/query_graph         - Graph traversal`;
+POST /mcp/call/recall       - Search or load context
+POST /mcp/call/memorize     - Save or delete data
+POST /mcp/call/review       - Manage contradictions`;
 
   return (
     <Card>

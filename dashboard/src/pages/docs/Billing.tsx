@@ -269,7 +269,7 @@ X402_NETWORK=eip155:84532            # Base Sepolia testnet (alias: "base-sepoli
 #   "transactions": [
 #     {
 #       "id": "txn_abc123",
-#       "tool": "store_memory",
+#       "tool": "memorize",
 #       "amount": "0.01",
 #       "currency": "USDC",
 #       "network": "base",

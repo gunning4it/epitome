@@ -381,7 +381,7 @@ export default function ApiReference() {
           language="text"
           code={`Query parameters:
   ?agent_id=agent_001       Filter by agent
-  ?action=store_memory      Filter by action type
+  ?action=write_pipeline      Filter by action type
   ?from=2026-02-01          Start date (ISO 8601)
   ?to=2026-02-17            End date (ISO 8601)
   ?limit=50&offset=0        Pagination`}

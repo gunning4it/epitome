@@ -271,7 +271,7 @@ describe('Data Access Security Fixes', () => {
   // M-1: MCP Legacy Tool Call Input Validation
   // ============================================================
   describe('M-1: MCP Legacy Tool Call Input Validation', () => {
-    it('should return 400 for unknown tool name', async () => {
+    it('should return 404 for unknown tool name', async () => {
       const headers = createTestAuthHeaders(testUser);
       const response = await app.request('/mcp/call/nonexistent_tool', {
         method: 'POST',
@@ -279,7 +279,7 @@ describe('Data Access Security Fixes', () => {
         body: JSON.stringify({}),
       });
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(404);
       const body = await response.json();
       expect(body.success).toBe(false);
       expect(body.error.message).toContain('Unknown tool');

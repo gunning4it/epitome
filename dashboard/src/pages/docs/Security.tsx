@@ -130,28 +130,28 @@ export async function withUserSchema<T>(
           <tbody className="text-muted-foreground">
             <tr className="border-b border-border/50">
               <td className="py-2 pr-4 font-mono text-xs text-foreground">profile</td>
-              <td className="py-2 pr-4 text-xs">read_profile</td>
-              <td className="py-2 text-xs">update_profile</td>
+              <td className="py-2 pr-4 text-xs">recall (context)</td>
+              <td className="py-2 text-xs">memorize (category:"profile")</td>
             </tr>
             <tr className="border-b border-border/50">
               <td className="py-2 pr-4 font-mono text-xs text-foreground">tables</td>
-              <td className="py-2 pr-4 text-xs">query_table</td>
-              <td className="py-2 text-xs">insert_record</td>
+              <td className="py-2 pr-4 text-xs">recall (mode:"table")</td>
+              <td className="py-2 text-xs">memorize (default)</td>
             </tr>
             <tr className="border-b border-border/50">
               <td className="py-2 pr-4 font-mono text-xs text-foreground">vectors</td>
-              <td className="py-2 pr-4 text-xs">search_memory</td>
-              <td className="py-2 text-xs">store_memory</td>
+              <td className="py-2 pr-4 text-xs">recall (mode:"memory")</td>
+              <td className="py-2 text-xs">memorize (storage:"memory")</td>
             </tr>
             <tr className="border-b border-border/50">
               <td className="py-2 pr-4 font-mono text-xs text-foreground">graph</td>
-              <td className="py-2 pr-4 text-xs">query_graph, get_entity_neighbors</td>
-              <td className="py-2 text-xs">(auto-managed by extraction pipeline)</td>
+              <td className="py-2 pr-4 text-xs">recall (mode:"graph")</td>
+              <td className="py-2 text-xs">(auto-managed)</td>
             </tr>
             <tr className="border-b border-border/50">
-              <td className="py-2 pr-4 font-mono text-xs text-foreground">activity</td>
-              <td className="py-2 pr-4 text-xs">(logged automatically)</td>
-              <td className="py-2 text-xs">log_activity</td>
+              <td className="py-2 pr-4 font-mono text-xs text-foreground">memory</td>
+              <td className="py-2 pr-4 text-xs">review (list)</td>
+              <td className="py-2 text-xs">review (resolve)</td>
             </tr>
           </tbody>
         </table>
@@ -189,7 +189,7 @@ function hasConsent(agentId: string, resource: string, permission: string): bool
       <h3 className="text-lg font-medium mt-6 mb-3">Consent Flow</h3>
       <CodeBlock
         language="text"
-        code={`Agent calls store_memory (requires 'vectors' write consent)
+        code={`Agent calls memorize (requires 'vectors' write consent)
   │
   ├── Check agent_consent table for (agent_id, 'vectors', 'write'|'read_write')
   │
@@ -240,12 +240,12 @@ function hasConsent(agentId: string, resource: string, permission: string): bool
               <td className="py-2 text-xs">per minute per agent</td>
             </tr>
             <tr className="border-b border-border/50">
-              <td className="py-2 pr-4">Vector store (store_memory)</td>
+              <td className="py-2 pr-4">Vector store (memorize)</td>
               <td className="py-2 pr-4 font-mono text-xs">30 requests</td>
               <td className="py-2 text-xs">per minute per agent</td>
             </tr>
             <tr className="border-b border-border/50">
-              <td className="py-2 pr-4">Vector search (search_memory)</td>
+              <td className="py-2 pr-4">Vector search (recall)</td>
               <td className="py-2 pr-4 font-mono text-xs">60 requests</td>
               <td className="py-2 text-xs">per minute per agent</td>
             </tr>
@@ -303,7 +303,7 @@ Retry-After: 45
         code={`{
   "id": "act_abc123",
   "agent_id": "agent_claude_desktop",  // null for dashboard/system actions
-  "action": "store_memory",
+  "action": "memorize",
   "resource": "vectors/facts",
   "details": {
     "content_preview": "My daughter Emma starts kindergarten...",

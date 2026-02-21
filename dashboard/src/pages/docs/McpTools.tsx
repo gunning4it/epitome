@@ -6,41 +6,30 @@ import { Badge } from '@/components/ui/badge';
 const headings = [
   { id: 'overview', text: 'Overview', level: 2 },
   { id: 'transport', text: 'Transport & Authentication', level: 2 },
-  { id: 'read-profile', text: 'read_profile', level: 2 },
-  { id: 'update-profile', text: 'update_profile', level: 2 },
-  { id: 'query-table', text: 'query_table', level: 2 },
-  { id: 'insert-record', text: 'insert_record', level: 2 },
-  { id: 'search-memory', text: 'search_memory', level: 2 },
-  { id: 'store-memory', text: 'store_memory', level: 2 },
-  { id: 'query-graph', text: 'query_graph', level: 2 },
-  { id: 'get-entity-neighbors', text: 'get_entity_neighbors', level: 2 },
-  { id: 'log-activity', text: 'log_activity', level: 2 },
+  { id: 'recall', text: 'recall', level: 2 },
+  { id: 'memorize', text: 'memorize', level: 2 },
+  { id: 'review', text: 'review', level: 2 },
 ];
 
 export default function McpTools() {
   return (
     <DocPage
       title="MCP Tools Reference"
-      description="Complete reference for all 9 MCP tools available to AI agents."
+      description="Complete reference for the 3 intent-based facade tools available to AI agents."
       headings={headings}
     >
       <h2 id="overview" className="text-xl font-semibold mt-8 mb-4">Overview</h2>
       <p className="text-muted-foreground mb-4">
-        Epitome exposes 9 tools through the Model Context Protocol (MCP). These tools allow
-        any MCP-compatible AI agent to read and write your personal data, search memories,
-        explore the knowledge graph, and log activity. All tools require authentication and
-        are subject to the consent system.
+        Epitome exposes 3 intent-based facade tools through the Model Context Protocol (MCP).
+        These tools internally delegate to the appropriate service-layer functions, keeping the
+        tool surface small and easy for agents to reason about. Any MCP-compatible AI agent can
+        use them to retrieve context, save knowledge, and manage memory quality. All tools
+        require authentication and are subject to the consent system.
       </p>
       <div className="flex flex-wrap gap-2 mb-6">
-        <Badge className="bg-green-500/10 text-green-400 border-green-500/20">read_profile</Badge>
-        <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">update_profile</Badge>
-        <Badge className="bg-green-500/10 text-green-400 border-green-500/20">query_table</Badge>
-        <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">insert_record</Badge>
-        <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20">search_memory</Badge>
-        <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">store_memory</Badge>
-        <Badge className="bg-green-500/10 text-green-400 border-green-500/20">query_graph</Badge>
-        <Badge className="bg-green-500/10 text-green-400 border-green-500/20">get_entity_neighbors</Badge>
-        <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">log_activity</Badge>
+        <Badge className="bg-green-500/10 text-green-400 border-green-500/20">recall</Badge>
+        <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">memorize</Badge>
+        <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20">review</Badge>
       </div>
 
       <h2 id="transport" className="text-xl font-semibold mt-10 mb-4">Transport & Authentication</h2>
@@ -56,331 +45,148 @@ export default function McpTools() {
         permission via the dashboard.
       </p>
 
-      {/* Tool 1: read_profile */}
-      <h2 id="read-profile" className="text-xl font-semibold mt-10 mb-4">read_profile</h2>
+      {/* Tool 1: recall */}
+      <h2 id="recall" className="text-xl font-semibold mt-10 mb-4">recall</h2>
       <ToolBlock
-        name="read_profile"
-        description="Read the user's complete profile, including name, timezone, preferences, family, work, health, and any other stored profile data. This should be called at the start of every conversation to personalize the interaction."
+        name="recall"
+        description="Retrieve information from all data sources. Call with no arguments at conversation start to load context, or with a topic for federated search across all sources."
+        params={[
+          { name: 'topic', type: 'string', required: false, description: 'What to search for. Empty = general context load.' },
+          { name: 'budget', type: 'string', required: false, description: '"small" | "medium" | "deep" — retrieval depth.' },
+          { name: 'mode', type: 'string', required: false, description: '"context" | "knowledge" | "memory" | "graph" | "table" — explicit routing to a specific data source.' },
+          { name: 'memory', type: 'object', required: false, description: 'For mode "memory" — { collection, query, minSimilarity?, limit? }' },
+          { name: 'graph', type: 'object', required: false, description: 'For mode "graph" — { queryType, entityId?, relation?, maxHops?, pattern? }' },
+          { name: 'table', type: 'object', required: false, description: 'For mode "table" — { table?, filters?, sql?, limit?, offset? }' },
+        ]}
       >
-        <p className="text-xs text-muted-foreground mb-3">This tool takes no parameters.</p>
         <p className="text-xs text-muted-foreground mb-3">
-          <strong className="text-foreground">Returns:</strong> The full profile JSONB document with
-          version number, confidence score, and last-updated timestamp.
+          <strong className="text-foreground">Default behavior (no mode):</strong> When called with no
+          topic, loads the user's full context (profile, tables, collections, entities, hints). When
+          called with a topic, performs a federated search across all sources with fusion ranking.
+        </p>
+        <p className="text-xs text-muted-foreground mb-3">
+          <strong className="text-foreground">Advanced modes:</strong>{' '}
+          <code className="text-xs">mode:"memory"</code> routes to collection-specific vector search,{' '}
+          <code className="text-xs">mode:"graph"</code> routes to graph traversal or pattern matching, and{' '}
+          <code className="text-xs">mode:"table"</code> routes to sandboxed SQL or filter-based table queries.
         </p>
         <CodeBlock
           language="json"
-          code={`// Example response
+          code={`// 1. Empty context load (call at conversation start)
+{}
+
+// 2. Federated search with topic
+{"topic": "food preferences"}
+
+// 3. mode:"memory" — vector search in a specific collection
 {
-  "version": 12,
-  "confidence": 0.87,
-  "updated_at": "2026-02-15T10:30:00Z",
+  "mode": "memory",
+  "memory": {
+    "collection": "journal",
+    "query": "coffee"
+  }
+}
+
+// 4. mode:"graph" — pattern query
+{
+  "mode": "graph",
+  "graph": {
+    "queryType": "pattern",
+    "pattern": "what food do I like?"
+  }
+}
+
+// 5. mode:"table" — sandboxed SQL query
+{
+  "mode": "table",
+  "table": {
+    "table": "meals",
+    "sql": "SELECT * FROM meals WHERE calories > 500 LIMIT 10"
+  }
+}`}
+        />
+      </ToolBlock>
+
+      {/* Tool 2: memorize */}
+      <h2 id="memorize" className="text-xl font-semibold mt-10 mb-4">memorize</h2>
+      <ToolBlock
+        name="memorize"
+        description="Save or delete a fact, experience, or event. Routes to the appropriate storage layer based on category, storage mode, and action."
+        params={[
+          { name: 'text', type: 'string', required: true, description: 'The fact/experience to save or forget.' },
+          { name: 'category', type: 'string', required: false, description: 'Organizer — "books", "meals", "profile", etc.' },
+          { name: 'data', type: 'object', required: false, description: 'Structured fields (e.g., {title: "Dune", rating: 5}).' },
+          { name: 'action', type: 'string', required: false, description: '"save" (default) or "delete".' },
+          { name: 'storage', type: 'string', required: false, description: '"record" (default) or "memory" — "memory" = vector-only save.' },
+          { name: 'collection', type: 'string', required: false, description: 'For storage:"memory" — vector collection name.' },
+          { name: 'metadata', type: 'object', required: false, description: 'For storage:"memory" — optional metadata.' },
+        ]}
+      >
+        <p className="text-xs text-muted-foreground mb-3">
+          <strong className="text-foreground">Routing order:</strong>
+        </p>
+        <ol className="text-xs text-muted-foreground mb-3 list-decimal list-inside space-y-1">
+          <li>Validate text (empty text returns INVALID_ARGS)</li>
+          <li><code className="text-xs">action:"delete"</code> — semantic search + soft-delete matching vectors</li>
+          <li><code className="text-xs">storage:"memory"</code> — vector-only save</li>
+          <li><code className="text-xs">category:"profile"</code> — deep-merge profile update</li>
+          <li>Default — addRecord (dual-writes table row + auto-vectorized memory)</li>
+        </ol>
+        <p className="text-xs text-muted-foreground mb-3">
+          <strong className="text-foreground">Side effects:</strong> Auto-creates tables and columns
+          for new data, triggers async entity extraction, and checks for contradictions after save.
+        </p>
+        <CodeBlock
+          language="json"
+          code={`// 1. Structured record (dual-writes table row + vector memory)
+{
+  "text": "Finished reading Dune",
+  "category": "books",
   "data": {
-    "name": "Alice Chen",
-    "timezone": "America/Los_Angeles",
-    "preferences": {
-      "food": { "favorites": ["sushi", "pad thai"], "regional_style": "Pacific Northwest" }
-    },
-    "family": [
-      { "name": "Bob", "relation": "spouse" },
-      { "name": "Emma", "relation": "daughter", "birthday": "2019-03-15" }
-    ],
-    "career": {
-      "primary_job": { "title": "Staff Engineer", "company": "Acme Corp" }
-    }
+    "title": "Dune",
+    "rating": 5
   }
-}`}
-        />
-      </ToolBlock>
+}
 
-      {/* Tool 2: update_profile */}
-      <h2 id="update-profile" className="text-xl font-semibold mt-10 mb-4">update_profile</h2>
-      <ToolBlock
-        name="update_profile"
-        description="Update one or more fields in the user's profile. Uses deep merge — only the specified fields are changed; all other data is preserved. Creates a new profile version for history tracking."
-        params={[
-          { name: 'data', type: 'object', required: true, description: 'An object containing the profile fields to update. Supports nested paths via dot notation or nested objects.' },
-        ]}
-      >
-        <CodeBlock
-          language="json"
-          code={`// Example: update timezone and add a food preference
+// 2. Vector-only journal entry
 {
+  "text": "Had a wonderful sunset walk today",
+  "storage": "memory",
+  "collection": "journal"
+}
+
+// 3. Profile update (deep-merge)
+{
+  "text": "I am vegetarian",
+  "category": "profile",
   "data": {
-    "timezone": "America/New_York",
-    "preferences": {
-      "food": {
-        "favorites": ["sushi", "pad thai", "pizza"]
-      }
-    }
+    "dietary": ["vegetarian"]
   }
 }`}
         />
       </ToolBlock>
 
-      {/* Tool 3: query_table */}
-      <h2 id="query-table" className="text-xl font-semibold mt-10 mb-4">query_table</h2>
+      {/* Tool 3: review */}
+      <h2 id="review" className="text-xl font-semibold mt-10 mb-4">review</h2>
       <ToolBlock
-        name="query_table"
-        description="Query records from one of the user's custom tables. Tables are user-defined structured collections (e.g., 'reading_list', 'projects', 'recipes'). Returns matching records with pagination support."
+        name="review"
+        description="Check for or resolve memory contradictions. Use to list pending contradictions or resolve them by confirming, rejecting, or keeping both entries."
         params={[
-          { name: 'table', type: 'string', required: true, description: 'Name of the table to query (e.g., "reading_list", "habits").' },
-          { name: 'filters', type: 'object', required: false, description: 'Key-value pairs to filter records. Keys are column names, values are the expected values.' },
-          { name: 'limit', type: 'number', required: false, description: 'Maximum number of records to return (default: 50, max: 200).' },
-          { name: 'offset', type: 'number', required: false, description: 'Number of records to skip for pagination (default: 0).' },
+          { name: 'action', type: 'string', required: true, description: '"list" or "resolve".' },
+          { name: 'metaId', type: 'number', required: false, description: 'For resolve — ID of the memory_meta entry to resolve.' },
+          { name: 'resolution', type: 'string', required: false, description: '"confirm" | "reject" | "keep_both".' },
         ]}
       >
         <CodeBlock
           language="json"
-          code={`// Example: query the reading list for unread books
-{
-  "table": "reading_list",
-  "filters": { "status": "unread" },
-  "limit": 10
-}
+          code={`// 1. List pending contradictions
+{"action": "list"}
 
-// Example response
+// 2. Resolve a specific contradiction
 {
-  "records": [
-    { "id": "rec_001", "title": "Dune", "author": "Frank Herbert", "status": "unread" },
-    { "id": "rec_002", "title": "Neuromancer", "author": "William Gibson", "status": "unread" }
-  ],
-  "total": 15,
-  "limit": 10,
-  "offset": 0
-}`}
-        />
-      </ToolBlock>
-
-      {/* Tool 4: insert_record */}
-      <h2 id="insert-record" className="text-xl font-semibold mt-10 mb-4">insert_record</h2>
-      <ToolBlock
-        name="insert_record"
-        description="Insert a new record into one of the user's custom tables. If the table does not exist, it is automatically created with the schema inferred from the first record's fields."
-        params={[
-          { name: 'table', type: 'string', required: true, description: 'Name of the table to insert into. Created automatically if it does not exist.' },
-          { name: 'data', type: 'object', required: true, description: 'The record data as key-value pairs. Keys become column names.' },
-        ]}
-      >
-        <CodeBlock
-          language="json"
-          code={`// Example: add a book to the reading list
-{
-  "table": "reading_list",
-  "data": {
-    "title": "Snow Crash",
-    "author": "Neal Stephenson",
-    "status": "unread",
-    "added_date": "2026-02-17"
-  }
-}
-
-// Example response
-{
-  "id": "rec_003",
-  "table": "reading_list",
-  "data": {
-    "title": "Snow Crash",
-    "author": "Neal Stephenson",
-    "status": "unread",
-    "added_date": "2026-02-17"
-  },
-  "created_at": "2026-02-17T14:20:00Z"
-}`}
-        />
-      </ToolBlock>
-
-      {/* Tool 5: search_memory */}
-      <h2 id="search-memory" className="text-xl font-semibold mt-10 mb-4">search_memory</h2>
-      <ToolBlock
-        name="search_memory"
-        description="Perform semantic vector search across the user's stored memories. Uses pgvector cosine similarity to find memories that are conceptually related to the query, even if they don't share exact keywords. Essential for personalized recommendations and context-aware responses."
-        params={[
-          { name: 'query', type: 'string', required: true, description: 'The natural-language search query. Converted to a vector embedding for similarity search.' },
-          { name: 'collection', type: 'string', required: false, description: 'Limit search to a specific vector collection (e.g., "conversations", "facts"). Omit to search all collections.' },
-          { name: 'limit', type: 'number', required: false, description: 'Maximum number of results to return (default: 10, max: 50).' },
-          { name: 'min_similarity', type: 'number', required: false, description: 'Minimum cosine similarity threshold, from 0 to 1 (default: 0.3). Higher values return fewer but more relevant results.' },
-        ]}
-      >
-        <CodeBlock
-          language="json"
-          code={`// Example: search for outdoor activity memories
-{
-  "query": "outdoor hobbies and activities",
-  "limit": 5,
-  "min_similarity": 0.4
-}
-
-// Example response
-{
-  "results": [
-    {
-      "id": "vec_001",
-      "content": "I love hiking in the Cascades, especially the PCT section near Snoqualmie Pass.",
-      "collection": "interests",
-      "similarity": 0.89,
-      "metadata": { "source": "claude-desktop" },
-      "created_at": "2026-02-10T09:15:00Z"
-    },
-    {
-      "id": "vec_002",
-      "content": "Started rock climbing at the local gym three times a week.",
-      "collection": "activities",
-      "similarity": 0.72,
-      "metadata": { "source": "chatgpt" },
-      "created_at": "2026-01-28T16:45:00Z"
-    }
-  ]
-}`}
-        />
-      </ToolBlock>
-
-      {/* Tool 6: store_memory */}
-      <h2 id="store-memory" className="text-xl font-semibold mt-10 mb-4">store_memory</h2>
-      <ToolBlock
-        name="store_memory"
-        description="Store a new memory as a vector embedding. The content is automatically embedded using text-embedding-3-small and stored in pgvector for semantic search. Also triggers async entity extraction to update the knowledge graph."
-        params={[
-          { name: 'content', type: 'string', required: true, description: 'The text content of the memory to store. Should be a meaningful statement or fact about the user.' },
-          { name: 'collection', type: 'string', required: false, description: 'The vector collection to store in (e.g., "facts", "preferences", "conversations"). Defaults to "general".' },
-          { name: 'metadata', type: 'object', required: false, description: 'Optional metadata to attach (e.g., source agent, conversation ID, tags).' },
-        ]}
-      >
-        <CodeBlock
-          language="json"
-          code={`// Example: store a new memory
-{
-  "content": "My daughter Emma starts kindergarten in September 2026 at Lincoln Elementary.",
-  "collection": "family",
-  "metadata": {
-    "source": "claude-desktop",
-    "conversation_id": "conv_abc123"
-  }
-}
-
-// Example response
-{
-  "id": "vec_003",
-  "content": "My daughter Emma starts kindergarten in September 2026 at Lincoln Elementary.",
-  "collection": "family",
-  "confidence": 0.95,
-  "entities_extracted": ["Emma", "Lincoln Elementary"],
-  "created_at": "2026-02-17T14:30:00Z"
-}`}
-        />
-      </ToolBlock>
-
-      {/* Tool 7: query_graph */}
-      <h2 id="query-graph" className="text-xl font-semibold mt-10 mb-4">query_graph</h2>
-      <ToolBlock
-        name="query_graph"
-        description="Query entities in the user's knowledge graph. The graph contains people, places, organizations, and concepts extracted from memories, with typed edges representing relationships between them."
-        params={[
-          { name: 'entity_type', type: 'string', required: false, description: 'Filter by entity type: "person", "place", "organization", "concept", "event". Omit to return all types.' },
-          { name: 'name', type: 'string', required: false, description: 'Filter entities by name (case-insensitive substring match).' },
-          { name: 'limit', type: 'number', required: false, description: 'Maximum number of entities to return (default: 50, max: 200).' },
-        ]}
-      >
-        <CodeBlock
-          language="json"
-          code={`// Example: find all people in the graph
-{
-  "entity_type": "person",
-  "limit": 20
-}
-
-// Example response
-{
-  "entities": [
-    {
-      "id": "ent_001",
-      "name": "Emma",
-      "type": "person",
-      "properties": { "relation": "daughter", "age": 6 },
-      "mention_count": 12,
-      "first_seen": "2026-01-05T10:00:00Z",
-      "last_seen": "2026-02-17T14:30:00Z"
-    },
-    {
-      "id": "ent_002",
-      "name": "Bob",
-      "type": "person",
-      "properties": { "relation": "spouse" },
-      "mention_count": 8,
-      "first_seen": "2026-01-05T10:00:00Z",
-      "last_seen": "2026-02-15T09:20:00Z"
-    }
-  ]
-}`}
-        />
-      </ToolBlock>
-
-      {/* Tool 8: get_entity_neighbors */}
-      <h2 id="get-entity-neighbors" className="text-xl font-semibold mt-10 mb-4">get_entity_neighbors</h2>
-      <ToolBlock
-        name="get_entity_neighbors"
-        description="Get all entities connected to a specific entity in the knowledge graph. Returns the entity's direct neighbors along with the typed edges connecting them. Useful for exploring relationships and building context about a person, place, or concept."
-        params={[
-          { name: 'entity_id', type: 'string', required: true, description: 'The ID of the entity whose neighbors to retrieve.' },
-        ]}
-      >
-        <CodeBlock
-          language="json"
-          code={`// Example: get neighbors of Emma
-{
-  "entity_id": "ent_001"
-}
-
-// Example response
-{
-  "entity": {
-    "id": "ent_001",
-    "name": "Emma",
-    "type": "person",
-    "properties": { "relation": "daughter", "age": 6 }
-  },
-  "neighbors": [
-    {
-      "entity": { "id": "ent_002", "name": "Bob", "type": "person" },
-      "edge": { "type": "family_member", "direction": "outgoing", "properties": { "relation": "father" } }
-    },
-    {
-      "entity": { "id": "ent_005", "name": "Lincoln Elementary", "type": "organization" },
-      "edge": { "type": "attends", "direction": "outgoing", "properties": { "start_date": "2026-09" } }
-    }
-  ]
-}`}
-        />
-      </ToolBlock>
-
-      {/* Tool 9: log_activity */}
-      <h2 id="log-activity" className="text-xl font-semibold mt-10 mb-4">log_activity</h2>
-      <ToolBlock
-        name="log_activity"
-        description="Log an activity entry to the user's audit trail. Use this to record significant actions taken by the agent, such as making recommendations, updating records, or performing research. Helps the user track what their AI agents have been doing."
-        params={[
-          { name: 'action', type: 'string', required: true, description: 'A short description of the action performed (e.g., "recommended_recipe", "updated_reading_list").' },
-          { name: 'details', type: 'object', required: false, description: 'Optional additional details about the action (e.g., what was recommended, what changed).' },
-        ]}
-      >
-        <CodeBlock
-          language="json"
-          code={`// Example: log a recommendation action
-{
-  "action": "recommended_recipe",
-  "details": {
-    "recipe": "Salmon Teriyaki Bowl",
-    "reason": "Matches user's preference for Pacific Northwest cuisine and fish",
-    "dietary_check": "no known allergies"
-  }
-}
-
-// Example response
-{
-  "id": "act_001",
-  "agent_id": "agent_claude_desktop",
-  "action": "recommended_recipe",
-  "details": { ... },
-  "created_at": "2026-02-17T14:35:00Z"
+  "action": "resolve",
+  "metaId": 123,
+  "resolution": "confirm"
 }`}
         />
       </ToolBlock>

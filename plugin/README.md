@@ -47,15 +47,9 @@ claude mcp add epitome \
 
 | Tool | Description |
 |------|-------------|
-| `get_user_context` | Load profile, entities, tables, and recent memories |
-| `update_profile` | Update personal info (deep-merges with existing data) |
-| `list_tables` | List all data tables you track |
-| `query_table` | Query records with filters or SQL |
-| `add_record` | Log meals, workouts, expenses, or any trackable data |
-| `search_memory` | Semantic search across saved memories |
-| `save_memory` | Save experiences, notes, and reflections |
-| `query_graph` | Query your knowledge graph for relationships and patterns |
-| `review_memories` | List and resolve memory contradictions |
+| `recall` | Load user context (no args) or search across all data sources (with topic/mode) |
+| `memorize` | Save structured records, profile updates, or vector memories; also supports deletion |
+| `review` | List and resolve memory contradictions |
 
 ## Example Queries
 
@@ -75,11 +69,11 @@ The plugin's skill teaches Claude when to use each tool automatically.
 
 The plugin includes a **skill** (`skills/epitome-memory/SKILL.md`) that teaches Claude:
 
-1. To load your context at the start of every conversation
-2. Which tool to use based on what you say
+1. To load your context at the start of every conversation via `recall`
+2. When to save data with `memorize` (structured records, profile updates, or vector memories)
 3. How to format data correctly (atomic columns, collection conventions)
 4. To save information automatically without asking permission
-5. How to handle contradictions and corrections
+5. How to handle contradictions and corrections via `review`
 
 ## Links
 

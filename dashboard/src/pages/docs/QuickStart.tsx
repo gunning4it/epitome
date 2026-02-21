@@ -92,7 +92,7 @@ docker compose up -d
       <h2 id="connect-agent" className="text-xl font-semibold mt-10 mb-4">Connect Your First Agent</h2>
       <p className="text-muted-foreground mb-4">
         Epitome uses the Model Context Protocol (MCP) to communicate with AI agents.
-        Configure your agent with Epitome's MCP server URL and it will gain access to 9 tools
+        Configure your agent with Epitome's MCP server URL and it will gain access to 3 tools
         for reading/writing your profile, memories, tables, knowledge graph, and activity log.
       </p>
 
@@ -160,32 +160,22 @@ docker compose up -d
         language="text"
         code={`You have access to Epitome, the user's personal AI database. Use it to:
 
-1. READ the user's profile at the start of every conversation with read_profile.
-   This gives you their name, preferences, family, work, health info, and more.
+1. RECALL at the start of every conversation by calling recall() with no arguments.
+   This loads the user's profile, tables, collections, and key entities.
+   When you need specific information, call recall({ topic: "..." }) to search.
 
-2. STORE important facts the user shares using store_memory.
-   Examples: "I just got promoted to VP", "My daughter's birthday is March 15",
-   "I'm allergic to shellfish". Always store with a descriptive collection name.
+2. MEMORIZE facts the user shares by calling memorize().
+   For structured data: memorize({ text: "...", category: "meals", data: {...} })
+   For personal info: memorize({ text: "...", category: "profile", data: {...} })
+   For experiences: memorize({ text: "...", storage: "memory", collection: "journal" })
 
-3. SEARCH past memories with search_memory before making recommendations
-   or answering questions where context matters. This uses semantic vector search.
-
-4. QUERY structured data with query_table for organized information
-   like reading lists, project trackers, or habit logs.
-
-5. INSERT structured records with insert_record when the user wants to
-   track something in a table format.
-
-6. EXPLORE the knowledge graph with query_graph and get_entity_neighbors
-   to understand relationships between people, places, and things in the user's life.
-
-7. LOG significant actions with log_activity so the user has an audit trail
-   of what their AI agents have done.
+3. REVIEW contradictions when corrections arise by calling review({ action: "list" })
+   then resolving with review({ action: "resolve", metaId: "...", resolution: "confirm" }).
 
 Guidelines:
-- Always read the profile first in a new conversation.
-- Store memories proactively when the user shares personal information.
-- Search memories before giving personalized advice.
+- Always recall context first in a new conversation.
+- Save information proactively when the user shares personal data.
+- Search with recall({ topic: "..." }) before giving personalized advice.
 - Never fabricate information — if you don't know, search first.
 - Respect the user's privacy: only store what they share directly.`}
       />
@@ -198,17 +188,17 @@ Guidelines:
         <li>
           <strong className="text-foreground">Read your profile:</strong> Ask the agent{' '}
           <code className="text-foreground bg-muted px-1 rounded">"What do you know about me?"</code>{' '}
-          — it should call <code className="text-foreground bg-muted px-1 rounded">read_profile</code> and return your profile data (or an empty profile if this is your first time).
+          — it should call <code className="text-foreground bg-muted px-1 rounded">recall</code> and return your profile data (or an empty profile if this is your first time).
         </li>
         <li>
           <strong className="text-foreground">Store a memory:</strong> Tell the agent something about yourself,
           like <code className="text-foreground bg-muted px-1 rounded">"I love hiking in the Cascades"</code>.
-          It should call <code className="text-foreground bg-muted px-1 rounded">store_memory</code>.
+          It should call <code className="text-foreground bg-muted px-1 rounded">memorize</code>.
         </li>
         <li>
           <strong className="text-foreground">Search memories:</strong> In a new conversation, ask{' '}
           <code className="text-foreground bg-muted px-1 rounded">"What are my outdoor hobbies?"</code>{' '}
-          — it should call <code className="text-foreground bg-muted px-1 rounded">search_memory</code> and find the hiking memory.
+          — it should call <code className="text-foreground bg-muted px-1 rounded">recall</code> with a topic and find the hiking memory.
         </li>
         <li>
           <strong className="text-foreground">Check the dashboard:</strong> Open the Epitome dashboard and
