@@ -24,6 +24,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { path: '/docs/mcp-tools', title: 'MCP Tools Reference' },
       { path: '/docs/api-reference', title: 'API Reference' },
+      { path: '/docs/memory-router', title: 'Memory Router' },
       { path: '/docs/billing', title: 'Billing & Agents' },
     ],
   },

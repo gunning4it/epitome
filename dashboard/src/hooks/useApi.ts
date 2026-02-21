@@ -10,6 +10,7 @@ import {
   vectorsApi,
   graphApi,
   memoryApi,
+  memoryRouterApi,
   activityApi,
   agentsApi,
   authApi,
@@ -219,6 +220,25 @@ export function useResolveReview() {
       memoryApi.resolve(id, action),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['memory', 'review'] });
+    },
+  });
+}
+
+// Memory Router hooks
+export function useMemoryRouterSettings() {
+  return useQuery({
+    queryKey: ['memory-router', 'settings'],
+    queryFn: memoryRouterApi.settings,
+  });
+}
+
+export function useUpdateMemoryRouterSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: memoryRouterApi.updateSettings,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['memory-router', 'settings'] });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
   });
 }

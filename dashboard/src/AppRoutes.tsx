@@ -29,6 +29,7 @@ const DocsIndex = lazy(() => import('@/pages/docs/DocsIndex'));
 const QuickStart = lazy(() => import('@/pages/docs/QuickStart'));
 const McpTools = lazy(() => import('@/pages/docs/McpTools'));
 const ApiReference = lazy(() => import('@/pages/docs/ApiReference'));
+const MemoryRouter = lazy(() => import('@/pages/docs/MemoryRouter'));
 const SelfHosting = lazy(() => import('@/pages/docs/SelfHosting'));
 const Architecture = lazy(() => import('@/pages/docs/Architecture'));
 const DataModel = lazy(() => import('@/pages/docs/DataModel'));
@@ -83,6 +84,7 @@ export default function AppRoutes() {
         <Route path="quick-start" element={<QuickStart />} />
         <Route path="mcp-tools" element={<McpTools />} />
         <Route path="api-reference" element={<ApiReference />} />
+        <Route path="memory-router" element={<MemoryRouter />} />
         <Route path="self-hosting" element={<SelfHosting />} />
         <Route path="architecture" element={<Architecture />} />
         <Route path="data-model" element={<DataModel />} />

@@ -24,6 +24,7 @@ import graphRoutes from '@/routes/graph';
 import consentRoutes from '@/routes/consent';
 import webhookRoutes from '@/routes/webhooks';
 import billingRoutes from '@/routes/billing';
+import memoryRouterRoutes from '@/routes/memory-router';
 import { createMcpRoutes } from '@/mcp/handler';
 import { createChatGptMcpRoutes } from '@/mcp-apps/handler';
 import {
@@ -78,6 +79,7 @@ app.route('/v1/memory', memoryRoutes);
 app.route('/v1/graph', graphRoutes);
 app.route('/v1/consent', consentRoutes);
 app.route('/v1/billing', billingRoutes);
+app.route('/v1/memory-router', memoryRouterRoutes);
 app.route('/v1', activityRoutes); // Activity routes include /v1/activity and /v1/export
 
 // Mount MCP server

@@ -9,6 +9,7 @@ import DocsIndex from '@/pages/docs/DocsIndex';
 import QuickStart from '@/pages/docs/QuickStart';
 import McpTools from '@/pages/docs/McpTools';
 import ApiReference from '@/pages/docs/ApiReference';
+import MemoryRouter from '@/pages/docs/MemoryRouter';
 import SelfHosting from '@/pages/docs/SelfHosting';
 import Architecture from '@/pages/docs/Architecture';
 import DataModel from '@/pages/docs/DataModel';
@@ -35,6 +36,7 @@ function PublicRoutes() {
         <Route path="quick-start" element={<QuickStart />} />
         <Route path="mcp-tools" element={<McpTools />} />
         <Route path="api-reference" element={<ApiReference />} />
+        <Route path="memory-router" element={<MemoryRouter />} />
         <Route path="self-hosting" element={<SelfHosting />} />
         <Route path="architecture" element={<Architecture />} />
         <Route path="data-model" element={<DataModel />} />

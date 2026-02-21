@@ -3,6 +3,7 @@ import {
   Rocket,
   Wrench,
   Code,
+  Route,
   Server,
   Layers,
   Database,
@@ -35,6 +36,13 @@ const sections = [
     icon: Code,
     path: '/docs/api-reference',
     color: 'text-purple-400',
+  },
+  {
+    title: 'Memory Router',
+    description: 'Proxy OpenAI/Anthropic calls with automatic memory',
+    icon: Route,
+    path: '/docs/memory-router',
+    color: 'text-indigo-400',
   },
   {
     title: 'Self-Hosting',

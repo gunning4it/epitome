@@ -124,6 +124,52 @@ export const agentIdSchema = z.object({
   id: z.string().min(1).max(100),
 }).strict();
 
+/**
+ * Memory Router OpenAI chat completions body
+ */
+export const memoryRouterOpenAiSchema = z.object({
+  model: z.string().min(1).max(200),
+  messages: z.array(
+    z.object({
+      role: z.enum(['system', 'user', 'assistant', 'tool']),
+      content: z.union([z.string(), z.array(z.unknown())]),
+    }).passthrough()
+  ).min(1),
+  stream: z.boolean().optional(),
+}).passthrough();
+
+/**
+ * Memory Router Anthropic messages body
+ */
+export const memoryRouterAnthropicSchema = z.object({
+  model: z.string().min(1).max(200),
+  messages: z.array(
+    z.object({
+      role: z.enum(['user', 'assistant']),
+      content: z.union([z.string(), z.array(z.unknown())]),
+    }).passthrough()
+  ).min(1),
+  system: z.union([z.string(), z.array(z.unknown())]).optional(),
+  stream: z.boolean().optional(),
+}).passthrough();
+
+/**
+ * Memory Router settings PATCH body
+ */
+export const memoryRouterSettingsPatchSchema = z.object({
+  body: z.object({
+    enabled: z.boolean().optional(),
+    defaultCollection: z.string()
+      .min(1)
+      .max(100)
+      .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+      .optional(),
+  }).strict().refine(
+    (payload) => payload.enabled !== undefined || payload.defaultCollection !== undefined,
+    { message: 'At least one setting must be provided' }
+  ),
+}).strict();
+
 // Type exports
 export type PatchProfileBody = z.infer<typeof patchProfileSchema>;
 export type ProfileHistoryQuery = z.infer<typeof profileHistoryQuerySchema>;
@@ -138,3 +184,6 @@ export type MemoryReviewIdParam = z.infer<typeof memoryReviewIdSchema>;
 export type MemoryResolveBody = z.infer<typeof memoryResolveSchema>;
 export type ActivityQuery = z.infer<typeof activityQuerySchema>;
 export type AgentIdParam = z.infer<typeof agentIdSchema>;
+export type MemoryRouterOpenAiBody = z.infer<typeof memoryRouterOpenAiSchema>;
+export type MemoryRouterAnthropicBody = z.infer<typeof memoryRouterAnthropicSchema>;
+export type MemoryRouterSettingsPatchBody = z.infer<typeof memoryRouterSettingsPatchSchema>;
