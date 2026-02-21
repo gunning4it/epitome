@@ -7,6 +7,7 @@ const headings = [
   { id: 'profile', text: 'Profile', level: 2 },
   { id: 'tables', text: 'Tables', level: 2 },
   { id: 'vectors', text: 'Vectors', level: 2 },
+  { id: 'memory-router', text: 'Memory Router', level: 2 },
   { id: 'graph', text: 'Graph', level: 2 },
   { id: 'memory', text: 'Memory', level: 2 },
   { id: 'activity', text: 'Activity', level: 2 },
@@ -241,6 +242,71 @@ export default function ApiReference() {
         description="List all vector collections with entry counts and most recent activity."
         auth="Session / API Key"
       />
+
+      {/* Memory Router */}
+      <h2 id="memory-router" className="text-xl font-semibold mt-10 mb-4">Memory Router</h2>
+      <p className="text-muted-foreground mb-4">
+        Memory Router proxies supported provider calls through Epitome to inject context before generation
+        and save conversation turns asynchronously after responses.
+      </p>
+
+      <EndpointBlock
+        method="POST"
+        path="/v1/memory-router/openai/v1/chat/completions"
+        description="Proxy an OpenAI chat completion call with optional memory injection."
+        auth="API Key / Session"
+      >
+        <CodeBlock
+          language="text"
+          code={`Required headers:
+  X-API-Key: epi_live_...                (Epitome key)
+  Authorization: Bearer sk-openai-...    (OpenAI key)
+
+Optional headers:
+  x-epitome-memory-mode: auto | off
+  x-epitome-memory-collection: memories
+  x-epitome-idempotency-key: req-123`}
+        />
+      </EndpointBlock>
+
+      <EndpointBlock
+        method="POST"
+        path="/v1/memory-router/anthropic/v1/messages"
+        description="Proxy an Anthropic messages call with optional memory injection."
+        auth="API Key / Session"
+      >
+        <CodeBlock
+          language="text"
+          code={`Required headers:
+  X-API-Key: epi_live_...                   (Epitome key)
+  x-anthropic-api-key: sk-ant-...           (Anthropic key)
+  anthropic-version: 2023-06-01`}
+        />
+      </EndpointBlock>
+
+      <EndpointBlock
+        method="GET"
+        path="/v1/memory-router/settings"
+        description="Get per-user Memory Router settings (dashboard/session auth only)."
+        auth="Session only"
+      />
+
+      <EndpointBlock
+        method="PATCH"
+        path="/v1/memory-router/settings"
+        description="Update per-user Memory Router settings (enable flag + default collection)."
+        auth="Session only"
+      >
+        <CodeBlock
+          language="json"
+          code={`{
+  "body": {
+    "enabled": true,
+    "defaultCollection": "memories"
+  }
+}`}
+        />
+      </EndpointBlock>
 
       {/* Graph */}
       <h2 id="graph" className="text-xl font-semibold mt-10 mb-4">Graph</h2>

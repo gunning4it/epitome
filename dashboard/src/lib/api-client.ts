@@ -197,6 +197,23 @@ export const memoryApi = {
     }),
 };
 
+export interface MemoryRouterSettings {
+  enabled: boolean;
+  defaultCollection: string;
+}
+
+// Memory Router API
+export const memoryRouterApi = {
+  settings: () =>
+    apiCall<{ data: MemoryRouterSettings; meta: Record<string, unknown> }>('/memory-router/settings')
+      .then((res) => res.data),
+  updateSettings: (settings: Partial<MemoryRouterSettings>) =>
+    apiCall<{ data: MemoryRouterSettings; meta: Record<string, unknown> }>('/memory-router/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ body: settings }),
+    }).then((res) => res.data),
+};
+
 // Activity Log API
 export const activityApi = {
   list: (params?: Record<string, string | number | boolean>) =>

@@ -57,6 +57,11 @@ export default function QuickStart() {
         language="text"
         code="https://epitome.fyi/mcp/usr_abc123def456"
       />
+      <p className="text-muted-foreground mt-4 mb-4">
+        Already have an OpenAI or Anthropic app and want minimal integration changes? Use the{' '}
+        <a href="/docs/memory-router" className="text-blue-400 hover:underline">Memory Router</a>{' '}
+        to proxy model calls through Epitome and enable memory without switching to MCP first.
+      </p>
 
       <h2 id="self-hosted-setup" className="text-xl font-semibold mt-10 mb-4">Self-Hosted Setup</h2>
       <p className="text-muted-foreground mb-4">

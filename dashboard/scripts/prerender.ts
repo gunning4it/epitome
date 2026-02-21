@@ -23,6 +23,7 @@ const PUBLIC_ROUTES = [
   '/docs/quick-start',
   '/docs/mcp-tools',
   '/docs/api-reference',
+  '/docs/memory-router',
   '/docs/self-hosting',
   '/docs/architecture',
   '/docs/data-model',
@@ -52,6 +53,10 @@ const ROUTE_META: Record<string, { title: string; description: string }> = {
   '/docs/api-reference': {
     title: 'API Reference — Epitome Docs',
     description: '22 REST endpoints for programmatic access to your personal AI database.',
+  },
+  '/docs/memory-router': {
+    title: 'Memory Router (LLM Proxy) — Epitome Docs',
+    description: 'Proxy OpenAI and Anthropic calls through Epitome for automatic memory retrieval and save.',
   },
   '/docs/self-hosting': {
     title: 'Self-Hosting Guide — Epitome Docs',

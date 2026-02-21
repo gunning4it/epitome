@@ -1,5 +1,12 @@
-import { useState } from 'react';
-import { useSession, useApiKeys, useCreateApiKey, useRevokeApiKey } from '@/hooks/useApi';
+import { useEffect, useState } from 'react';
+import {
+  useSession,
+  useApiKeys,
+  useCreateApiKey,
+  useRevokeApiKey,
+  useMemoryRouterSettings,
+  useUpdateMemoryRouterSettings,
+} from '@/hooks/useApi';
 import { apiCall } from '@/lib/api-client';
 import { PageHeader } from '@/components/PageHeader';
 import { CodeBlock } from '@/components/CodeBlock';
@@ -9,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -34,8 +42,10 @@ import { AlertTriangle, Key, Download, Trash2, Copy, Check } from 'lucide-react'
 export default function Settings() {
   const { data: session } = useSession();
   const { data: apiKeys, isLoading: keysLoading } = useApiKeys();
+  const { data: memoryRouterSettings, isLoading: memoryRouterLoading } = useMemoryRouterSettings();
   const createApiKey = useCreateApiKey();
   const revokeApiKey = useRevokeApiKey();
+  const updateMemoryRouterSettings = useUpdateMemoryRouterSettings();
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -46,6 +56,16 @@ export default function Settings() {
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [memoryRouterEnabled, setMemoryRouterEnabled] = useState(false);
+  const [memoryRouterCollection, setMemoryRouterCollection] = useState('memories');
+  const [memoryRouterError, setMemoryRouterError] = useState<string | null>(null);
+  const [memoryRouterSaved, setMemoryRouterSaved] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!memoryRouterSettings) return;
+    setMemoryRouterEnabled(memoryRouterSettings.enabled);
+    setMemoryRouterCollection(memoryRouterSettings.defaultCollection);
+  }, [memoryRouterSettings]);
 
   const handleExportData = async () => {
     try {
@@ -102,6 +122,29 @@ export default function Settings() {
     } catch (err) {
       console.error('Delete failed:', err);
       alert('Failed to delete vault');
+    }
+  };
+
+  const hasMemoryRouterChanges = !!memoryRouterSettings && (
+    memoryRouterEnabled !== memoryRouterSettings.enabled
+    || memoryRouterCollection.trim() !== memoryRouterSettings.defaultCollection
+  );
+
+  const handleSaveMemoryRouterSettings = async () => {
+    setMemoryRouterError(null);
+    setMemoryRouterSaved(null);
+    try {
+      const defaultCollection = memoryRouterCollection.trim() || 'memories';
+      await updateMemoryRouterSettings.mutateAsync({
+        enabled: memoryRouterEnabled,
+        defaultCollection,
+      });
+      setMemoryRouterCollection(defaultCollection);
+      setMemoryRouterSaved('Saved');
+      setTimeout(() => setMemoryRouterSaved(null), 2000);
+    } catch (err) {
+      console.error('Failed to update Memory Router settings:', err);
+      setMemoryRouterError(err instanceof Error ? err.message : 'Failed to save Memory Router settings');
     }
   };
 
@@ -396,6 +439,69 @@ export default function Settings() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Memory Router */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Memory Router (LLM Proxy)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">
+              Enable the Memory Router to add Epitome context to OpenAI/Anthropic calls with minimal app changes.
+              Keep this disabled unless you explicitly want proxy-based memory injection.
+            </p>
+
+            {memoryRouterError && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertTriangle className="size-4" />
+                <AlertDescription>{memoryRouterError}</AlertDescription>
+              </Alert>
+            )}
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between rounded-md border border-border p-3">
+                <div>
+                  <div className="text-sm font-medium text-foreground">Enable Memory Router</div>
+                  <div className="text-xs text-muted-foreground">
+                    Route supported LLM calls through Epitome for recall + async memory save.
+                  </div>
+                </div>
+                <Switch
+                  checked={memoryRouterEnabled}
+                  onCheckedChange={setMemoryRouterEnabled}
+                  disabled={memoryRouterLoading}
+                  aria-label="Enable Memory Router"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="memory-router-default-collection">Default Memory Collection</Label>
+                <Input
+                  id="memory-router-default-collection"
+                  value={memoryRouterCollection}
+                  onChange={(e) => setMemoryRouterCollection(e.target.value)}
+                  placeholder="memories"
+                  disabled={memoryRouterLoading}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Used when callers do not send <code className="text-foreground bg-muted px-1 rounded">x-epitome-memory-collection</code>.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Button
+                  onClick={handleSaveMemoryRouterSettings}
+                  disabled={!hasMemoryRouterChanges || updateMemoryRouterSettings.isPending || memoryRouterLoading}
+                >
+                  {updateMemoryRouterSettings.isPending ? 'Saving...' : 'Save Memory Router Settings'}
+                </Button>
+                {memoryRouterSaved && (
+                  <span className="text-xs text-green-600 dark:text-green-400">{memoryRouterSaved}</span>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Data Export */}
         <Card>
