@@ -319,27 +319,27 @@ export function buildRetrievalPlan(
     reason: 'Single call that searches all data sources in parallel',
   });
 
-  // Also recommend specific tools for high-scoring sources
+  // Also recommend mode-specific recall calls for high-scoring sources
   for (const source of scoredSources.filter(s => s.relevanceScore >= 0.5)) {
     switch (source.sourceType) {
       case 'vector':
         recommendedCalls.push({
           tool: 'recall',
-          args: { topic: '<user_topic>' },
+          args: { mode: 'memory', memory: { collection: source.sourceId, query: '<user_topic>' } },
           reason: source.reason,
         });
         break;
       case 'table':
         recommendedCalls.push({
           tool: 'recall',
-          args: { topic: '<user_topic>' },
+          args: { mode: 'table', table: { table: source.sourceId, sql: `SELECT * FROM "${source.sourceId}" WHERE text ILIKE '%<user_topic>%'` } },
           reason: source.reason,
         });
         break;
       case 'graph':
         recommendedCalls.push({
           tool: 'recall',
-          args: { topic: '<user_topic>' },
+          args: { mode: 'graph', graph: { queryType: 'pattern', pattern: '<user_topic>' } },
           reason: source.reason,
         });
         break;

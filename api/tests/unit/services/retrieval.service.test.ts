@@ -302,7 +302,7 @@ describe('retrieval.service', () => {
       expect(plan.recommendedCalls[0].tool).toBe('recall');
     });
 
-    it('recommends recall for high-scoring vector source', () => {
+    it('recommends recall mode:memory for high-scoring vector source', () => {
       const intent = classifyIntent('memories');
       const scoredSources = [
         { sourceType: 'vector' as const, sourceId: 'general', relevanceScore: 0.8, reason: 'match' },
@@ -310,13 +310,15 @@ describe('retrieval.service', () => {
 
       const plan = buildRetrievalPlan(intent, scoredSources);
 
-      const hasRecall = plan.recommendedCalls.some(
-        (call) => call.tool === 'recall'
+      const memoryCall = plan.recommendedCalls.find(
+        (call) => call.args.mode === 'memory'
       );
-      expect(hasRecall).toBe(true);
+      expect(memoryCall).toBeDefined();
+      expect(memoryCall!.tool).toBe('recall');
+      expect(memoryCall!.args.memory).toEqual({ collection: 'general', query: '<user_topic>' });
     });
 
-    it('recommends recall for high-scoring table source', () => {
+    it('recommends recall mode:table for high-scoring table source', () => {
       const intent = classifyIntent('meals data');
       const scoredSources = [
         { sourceType: 'table' as const, sourceId: 'meals', relevanceScore: 0.9, reason: 'match' },
@@ -324,13 +326,17 @@ describe('retrieval.service', () => {
 
       const plan = buildRetrievalPlan(intent, scoredSources);
 
-      const hasRecall = plan.recommendedCalls.some(
-        (call) => call.tool === 'recall'
+      const tableCall = plan.recommendedCalls.find(
+        (call) => call.args.mode === 'table'
       );
-      expect(hasRecall).toBe(true);
+      expect(tableCall).toBeDefined();
+      expect(tableCall!.tool).toBe('recall');
+      expect(tableCall!.args.table.table).toBe('meals');
+      expect(tableCall!.args.table.sql).toContain('meals');
+      expect(tableCall!.args.table.sql).toContain('<user_topic>');
     });
 
-    it('recommends recall for high-scoring graph source', () => {
+    it('recommends recall mode:graph for high-scoring graph source', () => {
       const intent = classifyIntent('relationships');
       const scoredSources = [
         { sourceType: 'graph' as const, sourceId: 'graph', relevanceScore: 0.8, reason: 'match' },
@@ -338,10 +344,12 @@ describe('retrieval.service', () => {
 
       const plan = buildRetrievalPlan(intent, scoredSources);
 
-      const hasRecall = plan.recommendedCalls.some(
-        (call) => call.tool === 'recall'
+      const graphCall = plan.recommendedCalls.find(
+        (call) => call.args.mode === 'graph'
       );
-      expect(hasRecall).toBe(true);
+      expect(graphCall).toBeDefined();
+      expect(graphCall!.tool).toBe('recall');
+      expect(graphCall!.args.graph).toEqual({ queryType: 'pattern', pattern: '<user_topic>' });
     });
 
     it('returns a plan object with recommendedCalls array', () => {
