@@ -8,6 +8,7 @@ export { getUserContext } from './getUserContext.js';
 export { updateProfile } from './updateProfile.js';
 export { addRecord } from './addRecord.js';
 export { saveMemory } from './saveMemory.js';
+export { retrieveUserKnowledge } from './retrieveUserKnowledge.js';
 
 export * from './types.js';
 export * from './adapters.js';

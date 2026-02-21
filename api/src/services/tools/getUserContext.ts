@@ -20,6 +20,7 @@ import { listCollections } from '@/services/vector.service';
 import { withUserSchema } from '@/db/client';
 import type { ToolContext, ToolResult } from './types.js';
 import { toolSuccess } from './types.js';
+import { classifyIntent, scoreSourceRelevance, buildRetrievalPlan, type RetrievalPlan } from '@/services/retrieval.service';
 
 export interface GetUserContextArgs {
   topic?: string;
@@ -72,12 +73,44 @@ interface CollectionSummary {
   entryCount: number;
 }
 
+interface RoutingHints {
+  hasStructuredData: boolean;
+  hasMemories: boolean;
+  hasGraphData: boolean;
+  suggestedTools: string[];
+}
+
 export interface GetUserContextData {
   profile: Record<string, unknown> | null;
   tables: TableSummary[];
   collections: CollectionSummary[];
   topEntities: TopEntity[];
   recentMemories: RecentMemory[];
+  hints: RoutingHints;
+  retrievalPlan?: RetrievalPlan;
+}
+
+function buildSuggestedTools(
+  tables: TableSummary[],
+  collections: CollectionSummary[],
+  topEntities: TopEntity[],
+): string[] {
+  const suggestions: string[] = [];
+  if (collections.length > 0) {
+    const names = collections.map((c) => c.name).join(', ');
+    suggestions.push(`search_memory — user has ${collections.length} vector collection(s): ${names}`);
+  }
+  if (topEntities.length > 0) {
+    suggestions.push(`query_graph — user has ${topEntities.length} entities in knowledge graph`);
+  }
+  if (tables.length > 0) {
+    const names = tables.map((t) => t.name).join(', ');
+    suggestions.push(`query_table — user has ${tables.length} table(s): ${names}`);
+  }
+  if (collections.length === 0 && topEntities.length === 0 && tables.length === 0) {
+    suggestions.push('save_memory — no data yet, start by saving information the user shares');
+  }
+  return suggestions;
 }
 
 export async function getUserContext(
@@ -99,6 +132,12 @@ export async function getUserContext(
         collections: [],
         topEntities: [],
         recentMemories: [],
+        hints: {
+          hasStructuredData: false,
+          hasMemories: false,
+          hasGraphData: false,
+          suggestedTools: ['save_memory — no data yet, start by saving information the user shares'],
+        },
       },
       'User context retrieved (limited — no profile consent).',
       { warnings: ['No profile read consent — all sections empty.'] },
@@ -218,8 +257,29 @@ export async function getUserContext(
     warnings.push('No vectors read consent — recentMemories section empty.');
   }
 
+  const hints: RoutingHints = {
+    hasStructuredData: tables.length > 0,
+    hasMemories: collections.length > 0,
+    hasGraphData: topEntities.length > 0,
+    suggestedTools: buildSuggestedTools(tables, collections, topEntities),
+  };
+
+  // Build retrieval plan when topic is provided
+  let retrievalPlan: RetrievalPlan | undefined;
+  if (args.topic) {
+    const intent = classifyIntent(args.topic);
+    const scored = scoreSourceRelevance(
+      args.topic,
+      intent,
+      tables.map(t => ({ tableName: t.name, description: t.description })),
+      collections.map(c => ({ collection: c.name, description: c.description })),
+      profile,
+    );
+    retrievalPlan = buildRetrievalPlan(intent, scored);
+  }
+
   return toolSuccess<GetUserContextData>(
-    { profile, tables, collections, topEntities, recentMemories },
+    { profile, tables, collections, topEntities, recentMemories, hints, retrievalPlan },
     'User context retrieved successfully.',
     warnings.length > 0 ? { warnings } : undefined,
   );

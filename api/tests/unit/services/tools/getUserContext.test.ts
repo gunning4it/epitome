@@ -29,6 +29,23 @@ vi.mock('@/db/client', () => ({
   withUserSchema: vi.fn(),
 }));
 
+vi.mock('@/services/retrieval.service', () => ({
+  classifyIntent: vi.fn().mockReturnValue({
+    primary: 'general',
+    expandedTerms: [],
+    entityTypeHints: [],
+    relationHints: [],
+  }),
+  scoreSourceRelevance: vi.fn().mockReturnValue([
+    { sourceType: 'vector', sourceId: 'general', relevanceScore: 0.6, reason: 'default collection' },
+  ]),
+  buildRetrievalPlan: vi.fn().mockReturnValue({
+    intent: { primary: 'general', expandedTerms: [], entityTypeHints: [], relationHints: [] },
+    scoredSources: [{ sourceType: 'vector', sourceId: 'general', relevanceScore: 0.6, reason: 'default collection' }],
+    recommendedCalls: [{ tool: 'retrieve_user_knowledge', args: { topic: '<user_topic>', budget: 'medium' }, reason: 'Single call' }],
+  }),
+}));
+
 import { getUserContext } from '@/services/tools/getUserContext';
 import { requireConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
@@ -298,5 +315,31 @@ describe('getUserContext service', () => {
     if (!result.success) return;
 
     expect(result.data.profile).toBeNull();
+  });
+
+  it('includes retrievalPlan when topic is provided', async () => {
+    consentAllowed();
+    setupFullMocks();
+
+    const result = await getUserContext({ topic: 'food' }, baseCtx);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data.retrievalPlan).toBeDefined();
+    expect(result.data.retrievalPlan!.recommendedCalls).toBeDefined();
+    expect(result.data.retrievalPlan!.recommendedCalls[0].tool).toBe('retrieve_user_knowledge');
+  });
+
+  it('does not include retrievalPlan when no topic is provided', async () => {
+    consentAllowed();
+    setupFullMocks();
+
+    const result = await getUserContext({}, baseCtx);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data.retrievalPlan).toBeUndefined();
   });
 });

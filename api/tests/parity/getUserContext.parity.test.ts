@@ -63,9 +63,17 @@ async function seedTestData(userId: string) {
  * Normalize data for comparison — strips Date serialization differences
  * (legacy returns Date objects which JSON.stringify handles differently from
  * the service layer that may produce identical strings).
+ *
+ * Also strips fields added by the service layer that the legacy handler
+ * doesn't return (hints, retrievalPlan). These are intentional enhancements.
  */
 function normalize(obj: unknown): unknown {
-  return JSON.parse(JSON.stringify(obj));
+  const parsed = JSON.parse(JSON.stringify(obj));
+  if (parsed && typeof parsed === 'object') {
+    delete (parsed as Record<string, unknown>).hints;
+    delete (parsed as Record<string, unknown>).retrievalPlan;
+  }
+  return parsed;
 }
 
 describe('getUserContext parity: legacy vs service+adapter', () => {

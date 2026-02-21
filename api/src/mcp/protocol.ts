@@ -1,7 +1,7 @@
 /**
  * MCP Protocol Server Factory
  *
- * Creates a McpServer instance with all 9 tools registered using the
+ * Creates a McpServer instance with all 10 tools registered using the
  * official @modelcontextprotocol/sdk. Used by the Streamable HTTP handler
  * to speak proper JSON-RPC 2.0 with Claude Desktop and other MCP clients.
  */
@@ -21,6 +21,7 @@ import { searchMemory } from './tools/searchMemory.js';
 import { saveMemory } from './tools/saveMemory.js';
 import { queryGraph } from './tools/queryGraph.js';
 import { reviewMemories } from './tools/reviewMemories.js';
+import { retrieveUserKnowledge } from './tools/retrieveUserKnowledge.js';
 
 // Service layer (feature-flagged path)
 import * as toolServices from '@/services/tools/index.js';
@@ -40,6 +41,7 @@ const SERVICE_MAP: Record<string, (args: any, ctx: toolServices.ToolContext) => 
   save_memory: toolServices.saveMemory,
   query_graph: toolServices.queryGraph,
   review_memories: toolServices.reviewMemories,
+  retrieve_user_knowledge: toolServices.retrieveUserKnowledge,
 };
 
 /**
@@ -100,7 +102,7 @@ async function callTool(
 }
 
 /**
- * Create a new McpServer with all 9 Epitome tools registered.
+ * Create a new McpServer with all 10 Epitome tools registered.
  * Each request gets its own server instance (stateless mode).
  */
 export function createMcpProtocolServer(): McpServer {
@@ -289,6 +291,28 @@ export function createMcpProtocolServer(): McpServer {
       openWorldHint: true,
     },
   }, async (args, extra) => callTool(reviewMemories, args, extra, 'review_memories'));
+
+  // 10. retrieve_user_knowledge
+  server.registerTool('retrieve_user_knowledge', {
+    description:
+      'Retrieve everything Epitome knows about a topic. Searches across all data sources (profile, tables, vector memories, knowledge graph) in parallel and returns fused, deduplicated facts with provenance. Use this instead of manually calling list_tables + search_memory + query_graph. Budget controls depth: "small" (fast, 15 facts max), "medium" (default, 40 facts), "deep" (thorough, 80 facts).',
+    inputSchema: {
+      topic: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe('Topic to retrieve knowledge about (e.g., "food preferences", "workout history", "Alex")'),
+      budget: z
+        .enum(['small', 'medium', 'deep'])
+        .optional()
+        .describe('Retrieval depth: "small" (fast, 15 facts), "medium" (default, 40), "deep" (thorough, 80)'),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: true,
+    },
+  }, async (args, extra) => callTool(retrieveUserKnowledge, args, extra, 'retrieve_user_knowledge'));
 
   return server;
 }

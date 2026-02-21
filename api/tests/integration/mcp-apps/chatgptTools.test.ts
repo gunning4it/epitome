@@ -135,7 +135,7 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     const body = await parseResponse(response);
     expect(body.result).toBeDefined();
     expect(body.result.tools).toBeInstanceOf(Array);
-    expect(body.result.tools.length).toBe(9);
+    expect(body.result.tools.length).toBe(10);
 
     // Check that annotations exist on tools
     const listTables = body.result.tools.find((t: any) => t.name === 'list_tables');
@@ -202,7 +202,7 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     expect(body.result.content[0].text).toMatch(/CONSENT_DENIED/i);
   });
 
-  it('all 9 tools are registered with correct names', async () => {
+  it('all 10 tools are registered with correct names', async () => {
     const response = await jsonRpc(
       app,
       'tools/list',
@@ -219,6 +219,7 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
       'list_tables',
       'query_graph',
       'query_table',
+      'retrieve_user_knowledge',
       'review_memories',
       'save_memory',
       'search_memory',
