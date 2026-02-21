@@ -169,6 +169,79 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     expect(body.result.structuredContent).toHaveProperty('profile');
   });
 
+  it('translates legacy list_tables through recall facade', async () => {
+    const response = await jsonRpc(
+      app,
+      'tools/call',
+      { name: 'list_tables', arguments: {} },
+      authHeaders(testUser.userId),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await parseResponse(response);
+    expect(body.result).toBeDefined();
+    expect(body.result.isError).toBeUndefined();
+    expect(body.result.structuredContent).toHaveProperty('tables');
+  });
+
+  it('translates legacy add_record through memorize facade', async () => {
+    const response = await jsonRpc(
+      app,
+      'tools/call',
+      {
+        name: 'add_record',
+        arguments: {
+          table: 'books',
+          data: { title: 'Dune', rating: 5 },
+        },
+      },
+      authHeaders(testUser.userId),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await parseResponse(response);
+    expect(body.result).toBeDefined();
+    expect(body.result.isError).toBeUndefined();
+    expect(body.result.structuredContent).toHaveProperty('table', 'books');
+  });
+
+  it('translates legacy query_table through recall facade', async () => {
+    // Seed a table row via translated legacy add_record first
+    const seedResponse = await jsonRpc(
+      app,
+      'tools/call',
+      {
+        name: 'add_record',
+        arguments: {
+          table: 'books',
+          data: { title: 'Hyperion', rating: 5 },
+        },
+      },
+      authHeaders(testUser.userId),
+    );
+    expect(seedResponse.status).toBe(200);
+
+    const response = await jsonRpc(
+      app,
+      'tools/call',
+      {
+        name: 'query_table',
+        arguments: {
+          table: 'books',
+          filters: { title: 'Hyperion' },
+        },
+      },
+      authHeaders(testUser.userId),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await parseResponse(response);
+    expect(body.result).toBeDefined();
+    expect(body.result.isError).toBeUndefined();
+    expect(body.result.structuredContent).toHaveProperty('table', 'books');
+    expect(body.result.structuredContent).toHaveProperty('records');
+  });
+
   it('returns isError true on consent denied', async () => {
     // Revoke all consent
     await revokeAllAgentConsent(testUser.userId, 'test-chatgpt-agent');

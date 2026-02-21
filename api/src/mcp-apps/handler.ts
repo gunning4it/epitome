@@ -11,6 +11,7 @@
 import { Hono } from 'hono';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { createChatGptMcpServer } from './server.js';
+import { rewriteLegacyJsonRpc } from '@/mcp/legacyTranslator.js';
 import { logger } from '@/utils/logger';
 import type { HonoEnv } from '@/types/hono';
 
@@ -35,6 +36,19 @@ export function createChatGptMcpRoutes(): Hono<HonoEnv> {
     try {
       await server.connect(transport);
 
+      let parsedBody: unknown | undefined;
+      if (c.req.method === 'POST') {
+        const contentType = c.req.header('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          try {
+            const body = await c.req.raw.clone().json();
+            parsedBody = rewriteLegacyJsonRpc(body);
+          } catch {
+            // Let transport parse/report malformed JSON-RPC bodies directly.
+          }
+        }
+      }
+
       const response = await transport.handleRequest(c.req.raw, {
         authInfo: {
           token: c.req.header('Authorization')?.replace('Bearer ', '') || '',
@@ -42,6 +56,7 @@ export function createChatGptMcpRoutes(): Hono<HonoEnv> {
           scopes: [],
           extra: { userId, agentId, tier },
         },
+        ...(parsedBody !== undefined ? { parsedBody } : {}),
       });
 
       return response;

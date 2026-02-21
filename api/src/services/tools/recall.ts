@@ -15,6 +15,7 @@ import { retrieveUserKnowledge } from './retrieveUserKnowledge.js';
 import { searchMemory } from './searchMemory.js';
 import { queryGraph } from './queryGraph.js';
 import { queryTable } from './queryTable.js';
+import { listTables } from './listTables.js';
 import type { ToolContext, ToolResult } from './types.js';
 import { toolFailure, ToolErrorCode } from './types.js';
 
@@ -86,13 +87,35 @@ export async function recall(
 
       case 'table':
         if (!args.table) {
+          return listTables({}, ctx);
+        }
+
+        if (typeof args.table !== 'object' || Array.isArray(args.table)) {
           return toolFailure(
             ToolErrorCode.INVALID_ARGS,
-            'INVALID_ARGS: mode "table" requires a "table" object.',
+            'INVALID_ARGS: mode "table" requires a table query object.',
             false,
           );
         }
-        return queryTable(args.table, ctx);
+
+        const tableArgs = args.table as {
+          table?: string;
+          tableName?: string;
+          sql?: string;
+          filters?: Record<string, unknown>;
+        };
+        const hasFilters =
+          tableArgs.filters &&
+          typeof tableArgs.filters === 'object' &&
+          !Array.isArray(tableArgs.filters) &&
+          Object.keys(tableArgs.filters).length > 0;
+        const hasQuery = Boolean(tableArgs.table || tableArgs.tableName || tableArgs.sql || hasFilters);
+
+        if (!hasQuery) {
+          return listTables({}, ctx);
+        }
+
+        return queryTable(tableArgs, ctx);
 
       default:
         return toolFailure(

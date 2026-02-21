@@ -15,6 +15,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { z } from 'zod';
 import { getToolDefinitions, executeTool, McpContext } from './server.js';
 import { createMcpProtocolServer } from './protocol.js';
+import { rewriteLegacyJsonRpc, translateLegacyToolCall } from './legacyTranslator.js';
 import { logger } from '@/utils/logger';
 import { recordApiCall, getEffectiveTier } from '@/services/metering.service';
 import { x402Service } from '@/services/x402.service';
@@ -230,6 +231,20 @@ export function createMcpRoutes(): Hono<HonoEnv> {
     await server.connect(transport);
 
     try {
+      let parsedBody: unknown | undefined;
+      if (c.req.method === 'POST') {
+        const contentType = c.req.header('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          try {
+            // Parse a clone so transport can still parse the original request body on its own.
+            const body = await c.req.raw.clone().json();
+            parsedBody = rewriteLegacyJsonRpc(body);
+          } catch {
+            // Leave parsedBody undefined on parse errors; transport will return protocol-level errors.
+          }
+        }
+      }
+
       const response = await transport.handleRequest(c.req.raw, {
         authInfo: {
           token: c.req.header('Authorization')?.replace('Bearer ', '') || '',
@@ -237,6 +252,7 @@ export function createMcpRoutes(): Hono<HonoEnv> {
           scopes: [],
           extra: { userId: userId || '', agentId, tier: getEffectiveTier(c as any) },
         },
+        ...(parsedBody !== undefined ? { parsedBody } : {}),
       });
       logger.info('MCP request completed', { userId, agentId, status: response.status });
       return response;
@@ -269,12 +285,36 @@ export function createMcpRoutes(): Hono<HonoEnv> {
   // Call a tool
   // M-1 SECURITY FIX: Validate tool name and request body before execution
   app.post('/call/:toolName', async (c) => {
-    const toolName = c.req.param('toolName');
+    let toolName = c.req.param('toolName');
 
     try {
       // Build MCP context from auth middleware (runs before tool validation
       // so unauthenticated requests get 401, not a tool-enumeration signal)
       const context = buildMcpContext(c);
+
+      let args: unknown;
+      try {
+        args = await c.req.json();
+      } catch {
+        return c.json(
+          { success: false, error: { code: 'BAD_REQUEST', message: 'Request body must be valid JSON' } },
+          400,
+        );
+      }
+
+      // M-1: Validate request body is a plain object (not array, not primitive)
+      if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+        return c.json(
+          { success: false, error: { code: 'BAD_REQUEST', message: 'Request body must be a JSON object' } },
+          400
+        );
+      }
+
+      const legacy = translateLegacyToolCall(toolName, args as Record<string, unknown>);
+      if (legacy) {
+        toolName = legacy.toolName;
+        args = legacy.args;
+      }
 
       // M-1: Validate toolName against known tool names
       const knownTools = getToolDefinitions().map((t) => t.name);
@@ -282,16 +322,6 @@ export function createMcpRoutes(): Hono<HonoEnv> {
         return c.json(
           { success: false, error: { code: 'NOT_FOUND', message: `Unknown tool: ${toolName}` } },
           404
-        );
-      }
-
-      const args = await c.req.json();
-
-      // M-1: Validate request body is a plain object (not array, not primitive)
-      if (args === null || typeof args !== 'object' || Array.isArray(args)) {
-        return c.json(
-          { success: false, error: { code: 'BAD_REQUEST', message: 'Request body must be a JSON object' } },
-          400
         );
       }
 

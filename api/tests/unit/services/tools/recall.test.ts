@@ -19,12 +19,16 @@ vi.mock('@/services/tools/queryGraph', () => ({
 vi.mock('@/services/tools/queryTable', () => ({
   queryTable: vi.fn(),
 }));
+vi.mock('@/services/tools/listTables', () => ({
+  listTables: vi.fn(),
+}));
 
 import { getUserContext } from '@/services/tools/getUserContext';
 import { retrieveUserKnowledge } from '@/services/tools/retrieveUserKnowledge';
 import { searchMemory } from '@/services/tools/searchMemory';
 import { queryGraph } from '@/services/tools/queryGraph';
 import { queryTable } from '@/services/tools/queryTable';
+import { listTables } from '@/services/tools/listTables';
 
 const mockContext: ToolContext = {
   userId: 'user-123',
@@ -287,14 +291,34 @@ describe('recall facade service', () => {
     expect(queryTable).toHaveBeenCalledWith(tableArgs, mockContext);
   });
 
-  it('mode:table without table object returns INVALID_ARGS', async () => {
+  it('mode:table without table object delegates to listTables', async () => {
+    const mockResult = {
+      success: true as const,
+      data: { tables: [] },
+      message: 'Found 0 table(s)',
+    };
+    vi.mocked(listTables).mockResolvedValue(mockResult as any);
+
     const result = await recall({ mode: 'table' }, mockContext);
 
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.code).toBe(ToolErrorCode.INVALID_ARGS);
-      expect(result.message).toMatch(/table/);
-    }
+    expect(result).toBe(mockResult);
+    expect(listTables).toHaveBeenCalledWith({}, mockContext);
+    expect(queryTable).not.toHaveBeenCalled();
+  });
+
+  it('mode:table with empty table object delegates to listTables', async () => {
+    const mockResult = {
+      success: true as const,
+      data: { tables: [{ name: 'books' }] },
+      message: 'Found 1 table(s)',
+    };
+    vi.mocked(listTables).mockResolvedValue(mockResult as any);
+
+    const result = await recall({ mode: 'table', table: {} }, mockContext);
+
+    expect(result).toBe(mockResult);
+    expect(listTables).toHaveBeenCalledWith({}, mockContext);
+    expect(queryTable).not.toHaveBeenCalled();
   });
 
   it('unknown mode returns INVALID_ARGS', async () => {
