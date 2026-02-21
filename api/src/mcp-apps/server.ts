@@ -1,7 +1,7 @@
 /**
  * ChatGPT Apps MCP Server Factory
  *
- * Creates a McpServer with all 10 Epitome tools registered using the service
+ * Creates a McpServer with 3 intent-based facade Epitome tools using the service
  * layer and chatgptAdapter for response formatting. Tool annotations provide
  * readOnlyHint/destructiveHint/openWorldHint metadata for ChatGPT.
  *
@@ -44,116 +44,77 @@ function wrapTool<T>(
 }
 
 /**
- * Create a ChatGPT Apps MCP server with all 10 tools.
+ * Create a ChatGPT Apps MCP server with 3 facade tools.
  * Each request gets its own server instance (stateless mode).
  */
 export function createChatGptMcpServer(): McpServer {
   const server = new McpServer({ name: 'epitome', version: '1.0.0' });
 
-  server.registerTool('get_user_context', {
-    description: 'Load user profile, preferences, top entities, and recent memories.',
-    inputSchema: { topic: z.string().optional() },
-    annotations: TOOL_ANNOTATIONS.get_user_context,
-  }, wrapTool(tools.getUserContext));
-
-  server.registerTool('update_profile', {
-    description: 'Update user profile with deep merge (RFC 7396).',
+  server.registerTool('recall', {
+    description:
+      "Retrieve information Epitome knows about a topic. Default: leave topic empty for user context, provide topic for federated search. Advanced: set mode to 'memory', 'graph', or 'table' with the corresponding options object for direct queries (e.g., SQL via mode='table').",
     inputSchema: {
-      data: z.record(z.string(), z.unknown()),
-      reason: z.string().optional(),
+      topic: z.string().optional().describe('What to search for. Empty = general context at conversation start.'),
+      budget: z.enum(['small', 'medium', 'deep']).optional().describe('small=quick, medium=default, deep=research only'),
+      mode: z.enum(['context', 'knowledge', 'memory', 'graph', 'table']).optional().describe('Routing mode. Default: auto (no topic=context, topic=knowledge).'),
+      memory: z.object({
+        collection: z.string().describe('Vector collection to search'),
+        query: z.string().describe('Search query text'),
+        minSimilarity: z.number().optional().describe('Min cosine similarity (0-1, default 0.7)'),
+        limit: z.number().optional().describe('Max results (default 10)'),
+      }).optional().describe('For mode "memory": vector search options'),
+      graph: z.object({
+        queryType: z.enum(['traverse', 'pattern']).describe('Query type'),
+        entityId: z.number().optional().describe('For traverse: starting entity ID'),
+        relation: z.string().optional().describe('For traverse: relation type to follow'),
+        maxHops: z.number().optional().describe('For traverse: max hops (default 2, max 3)'),
+        pattern: z.union([
+          z.string().min(1),
+          z.object({
+            entityType: z.string().optional(),
+            entityName: z.string().optional(),
+            relation: z.string().optional(),
+            targetType: z.string().optional(),
+          }),
+        ]).optional().describe('For pattern: natural language or structured criteria'),
+      }).optional().describe('For mode "graph": graph query options'),
+      table: z.object({
+        table: z.string().optional().describe('Table name'),
+        tableName: z.string().optional().describe('Deprecated alias for "table"'),
+        filters: z.record(z.string(), z.unknown()).optional().describe('Structured filters'),
+        sql: z.string().optional().describe('SQL SELECT query (read-only, sandboxed)'),
+        limit: z.number().optional().describe('Max results (default 50, max 1000)'),
+        offset: z.number().optional().describe('Pagination offset'),
+      }).optional().describe('For mode "table": table query options'),
     },
-    annotations: TOOL_ANNOTATIONS.update_profile,
-  }, wrapTool(tools.updateProfile));
+    annotations: TOOL_ANNOTATIONS.recall,
+  }, wrapTool(tools.recall));
 
-  server.registerTool('list_tables', {
-    description: 'List all user-tracked tables with schema and record counts.',
-    inputSchema: {},
-    annotations: TOOL_ANNOTATIONS.list_tables,
-  }, wrapTool(tools.listTables));
-
-  server.registerTool('query_table', {
-    description: 'Query table records with filters or sandboxed SQL.',
+  server.registerTool('memorize', {
+    description:
+      "Save or delete a fact, experience, or event. Always provide text. Use storage='memory' for unstructured notes (journal, reflections). Use storage='record' (default) with structured data for trackable items. Set category='profile' for identity updates.",
     inputSchema: {
-      table: z.string().optional(),
-      tableName: z.string().optional(),
-      filters: z.record(z.string(), z.unknown()).optional(),
-      sql: z.string().optional(),
-      limit: z.number().optional(),
-      offset: z.number().optional(),
+      text: z.string().min(1).describe('The fact/experience to save or forget (always required)'),
+      category: z.string().optional().describe('Organizer: "books", "meals", "profile", etc.'),
+      data: z.record(z.string(), z.unknown()).optional().describe('Structured fields (e.g., {title: "Dune", rating: 5})'),
+      action: z.enum(['save', 'delete']).optional().describe('Default "save"'),
+      storage: z.enum(['record', 'memory']).optional().describe('Default "record". Use "memory" for vector-only unstructured saves.'),
+      collection: z.string().optional().describe('For storage "memory": vector collection name. Defaults to category.'),
+      metadata: z.record(z.string(), z.unknown()).optional().describe('For storage "memory": optional metadata. Defaults to data.'),
     },
-    annotations: TOOL_ANNOTATIONS.query_table,
-  }, wrapTool(tools.queryTable));
+    annotations: TOOL_ANNOTATIONS.memorize,
+  }, wrapTool(tools.memorize));
 
-  server.registerTool('add_record', {
-    description: 'Insert a record into a table (auto-creates table if needed).',
+  server.registerTool('review', {
+    description:
+      'Check for or resolve memory contradictions. Use "list" to see conflicts, "resolve" with a metaId and resolution to fix one.',
     inputSchema: {
-      table: z.string().optional(),
-      tableName: z.string().optional(),
-      data: z.record(z.string(), z.unknown()),
-      tableDescription: z.string().optional(),
+      action: z.enum(['list', 'resolve']).describe('Action: "list" to get contradictions, "resolve" to fix one'),
+      metaId: z.number().optional().describe('For resolve: ID of memory_meta entry to resolve'),
+      resolution: z.enum(['confirm', 'reject', 'keep_both']).optional().describe('For resolve: how to handle the contradiction'),
     },
-    annotations: TOOL_ANNOTATIONS.add_record,
-  }, wrapTool(tools.addRecord));
-
-  server.registerTool('search_memory', {
-    description: 'Semantic search across vector memory collections.',
-    inputSchema: {
-      collection: z.string(),
-      query: z.string(),
-      minSimilarity: z.number().optional(),
-      limit: z.number().optional(),
-    },
-    annotations: TOOL_ANNOTATIONS.search_memory,
-  }, wrapTool(tools.searchMemory));
-
-  server.registerTool('save_memory', {
-    description: 'Save text as searchable memory with vector embeddings.',
-    inputSchema: {
-      collection: z.string(),
-      text: z.string(),
-      metadata: z.record(z.string(), z.unknown()).optional(),
-    },
-    annotations: TOOL_ANNOTATIONS.save_memory,
-  }, wrapTool(tools.saveMemory));
-
-  server.registerTool('query_graph', {
-    description: 'Traverse knowledge graph or run pattern-based queries.',
-    inputSchema: {
-      queryType: z.enum(['traverse', 'pattern']),
-      entityId: z.number().optional(),
-      relation: z.string().optional(),
-      maxHops: z.number().optional(),
-      pattern: z.union([
-        z.string().min(1),
-        z.object({
-          entityType: z.string().optional(),
-          entityName: z.string().optional(),
-          relation: z.string().optional(),
-          targetType: z.string().optional(),
-        }),
-      ]).optional(),
-    },
-    annotations: TOOL_ANNOTATIONS.query_graph,
-  }, wrapTool(tools.queryGraph));
-
-  server.registerTool('review_memories', {
-    description: 'Get or resolve memory contradictions.',
-    inputSchema: {
-      action: z.enum(['list', 'resolve']),
-      metaId: z.number().optional(),
-      resolution: z.enum(['confirm', 'reject', 'keep_both']).optional(),
-    },
-    annotations: TOOL_ANNOTATIONS.review_memories,
-  }, wrapTool(tools.reviewMemories));
-
-  server.registerTool('retrieve_user_knowledge', {
-    description: 'Retrieve everything Epitome knows about a topic. Searches across all data sources (profile, tables, vector memories, knowledge graph) in parallel and returns fused, deduplicated facts with provenance. Use this instead of manually calling list_tables + search_memory + query_graph. Budget controls depth: "small" (fast, 15 facts max), "medium" (default, 40 facts), "deep" (thorough, 80 facts).',
-    inputSchema: {
-      topic: z.string().min(1).max(500).describe('Topic to retrieve knowledge about'),
-      budget: z.enum(['small', 'medium', 'deep']).optional().describe('Retrieval depth (default: "medium")'),
-    },
-    annotations: TOOL_ANNOTATIONS.retrieve_user_knowledge,
-  }, wrapTool(tools.retrieveUserKnowledge));
+    annotations: TOOL_ANNOTATIONS.review,
+  }, wrapTool(tools.review));
 
   return server;
 }

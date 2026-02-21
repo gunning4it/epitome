@@ -1,7 +1,7 @@
 /**
  * Epitome MCP Server
  *
- * Model Context Protocol server exposing 10 tools for AI agents
+ * Model Context Protocol server exposing 3 intent-based facade tools for AI agents
  * Simplified HTTP-based implementation without SDK transport layer
  *
  * Architecture:
@@ -13,16 +13,9 @@
  * Reference: EPITOME_TECH_SPEC.md §8, §11
  */
 
-import { getUserContext } from './tools/getUserContext.js';
-import { updateProfile } from './tools/updateProfile.js';
-import { listTables } from './tools/listTables.js';
-import { queryTable } from './tools/queryTable.js';
-import { addRecord } from './tools/addRecord.js';
-import { searchMemory } from './tools/searchMemory.js';
-import { saveMemory } from './tools/saveMemory.js';
-import { queryGraph } from './tools/queryGraph.js';
-import { reviewMemories } from './tools/reviewMemories.js';
-import { retrieveUserKnowledge } from './tools/retrieveUserKnowledge.js';
+// Service layer for facade tools
+import * as toolServices from '@/services/tools/index.js';
+import { buildToolContext } from '@/services/tools/context.js';
 
 /**
  * MCP Server Context
@@ -35,20 +28,11 @@ export interface McpContext {
   tier: string;
 }
 
-/**
- * MCP Tool Registry
- */
-const TOOLS = {
-  get_user_context: getUserContext,
-  update_profile: updateProfile,
-  list_tables: listTables,
-  query_table: queryTable,
-  add_record: addRecord,
-  search_memory: searchMemory,
-  save_memory: saveMemory,
-  query_graph: queryGraph,
-  review_memories: reviewMemories,
-  retrieve_user_knowledge: retrieveUserKnowledge,
+// Facade tools use the service layer directly
+const FACADE_TOOLS: Record<string, (args: any, ctx: toolServices.ToolContext) => Promise<toolServices.ToolResult>> = {
+  recall: toolServices.recall,
+  memorize: toolServices.memorize,
+  review: toolServices.review,
 };
 
 /**
@@ -57,214 +41,124 @@ const TOOLS = {
 export function getToolDefinitions() {
   return [
     {
-      name: 'get_user_context',
-      description: `Load user's profile, preferences, and recent context. Call this at the start of every conversation to understand what you know about the user. Returns profile summary, top entities by relevance and confidence, table inventory, and vector collection list.`,
+      name: 'recall',
+      description: "Retrieve information Epitome knows about a topic. Default: leave topic empty for user context, provide topic for federated search. Advanced: set mode to 'memory', 'graph', or 'table' with the corresponding options object for direct queries (e.g., SQL via mode='table').",
       inputSchema: {
         type: 'object',
         properties: {
           topic: {
             type: 'string',
-            description:
-              'Optional topic for relevance ranking (e.g., "food preferences", "workout history")',
+            description: 'What to search for. Empty = general context at conversation start.',
           },
-        },
-      },
-    },
-    {
-      name: 'update_profile',
-      description: `Update user profile fields. Use this when the user shares personal information like allergies, dietary preferences, family members, timezone, job, or any other profile data. Deep-merges new data with existing profile. Returns updated profile.`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          data: {
-            type: 'object',
-            description:
-              'Partial profile data to merge. Supports nested updates like {preferences: {dietary: ["vegetarian"]}}',
-          },
-          reason: {
+          budget: {
             type: 'string',
-            description: 'Optional description of what changed (e.g., "user mentioned new allergy")',
+            enum: ['small', 'medium', 'deep'],
+            description: 'small=quick, medium=default, deep=research only',
           },
-        },
-        required: ['data'],
-      },
-    },
-    {
-      name: 'list_tables',
-      description: `List all data tables the user tracks (meals, workouts, expenses, habits, etc.). Returns table names, descriptions, column schemas, and record counts. Use this to discover what data is available before querying.`,
-      inputSchema: {
-        type: 'object',
-        properties: {},
-      },
-    },
-    {
-      name: 'query_table',
-      description: `Query records from a data table. Use structured filters for simple queries or SQL for complex analysis. Supports pagination. Returns matching records with metadata.`,
-      inputSchema: {
-        type: 'object',
-        properties: {
+          mode: {
+            type: 'string',
+            enum: ['context', 'knowledge', 'memory', 'graph', 'table'],
+            description: 'Routing mode. Default: auto (no topic=context, topic=knowledge).',
+          },
+          memory: {
+            type: 'object',
+            description: 'For mode "memory": vector search options',
+            properties: {
+              collection: { type: 'string', description: 'Vector collection to search' },
+              query: { type: 'string', description: 'Search query text' },
+              minSimilarity: { type: 'number', description: 'Min cosine similarity (0-1, default 0.7)' },
+              limit: { type: 'number', description: 'Max results (default 10)' },
+            },
+            required: ['collection', 'query'],
+          },
+          graph: {
+            type: 'object',
+            description: 'For mode "graph": graph query options',
+            properties: {
+              queryType: {
+                type: 'string',
+                enum: ['traverse', 'pattern'],
+                description: 'Query type',
+              },
+              entityId: { type: 'number', description: 'For traverse: starting entity ID' },
+              relation: { type: 'string', description: 'For traverse: relation type to follow' },
+              maxHops: { type: 'number', description: 'For traverse: max hops (default 2, max 3)' },
+              pattern: {
+                oneOf: [
+                  { type: 'string', description: 'Natural-language pattern' },
+                  {
+                    type: 'object',
+                    description: 'Structured pattern criteria',
+                    properties: {
+                      entityType: { type: 'string' },
+                      entityName: { type: 'string' },
+                      relation: { type: 'string' },
+                      targetType: { type: 'string' },
+                    },
+                  },
+                ],
+              },
+            },
+            required: ['queryType'],
+          },
           table: {
-            type: 'string',
-            description: 'Name of the table to query (e.g., "meals", "workouts")',
-          },
-          tableName: {
-            type: 'string',
-            description: 'Deprecated alias for "table".',
-          },
-          filters: {
             type: 'object',
-            description:
-              'Structured filters as key-value pairs (e.g., {date: "2024-01-15", category: "dinner"})',
-          },
-          sql: {
-            type: 'string',
-            description:
-              'Optional SQL SELECT query (read-only, sandboxed). Use for complex queries with JOINs, aggregations, etc.',
-          },
-          limit: {
-            type: 'number',
-            description: 'Maximum number of results to return (default 50, max 1000)',
-          },
-          offset: {
-            type: 'number',
-            description: 'Number of results to skip for pagination',
+            description: 'For mode "table": table query options',
+            properties: {
+              table: { type: 'string', description: 'Table name' },
+              tableName: { type: 'string', description: 'Deprecated alias for "table"' },
+              filters: { type: 'object', description: 'Structured filters' },
+              sql: { type: 'string', description: 'SQL SELECT query (read-only, sandboxed)' },
+              limit: { type: 'number', description: 'Max results (default 50, max 1000)' },
+              offset: { type: 'number', description: 'Pagination offset' },
+            },
           },
         },
       },
     },
     {
-      name: 'add_record',
-      description: `Add a new record to a table. Tables and new columns are auto-created on the fly — send each piece of data as its own column. Use this when the user logs meals, workouts, expenses, habits, medications, or any trackable data. Automatically extracts entities and creates graph connections.
-
-Column schema guidance for common tables:
-- meals: {food: "dish name only", restaurant: "venue name", ingredients: "comma-separated list", meal_type: "breakfast|lunch|dinner|snack", calories: 800}
-- workouts: {exercise: "exercise name", duration: 45, intensity: "low|moderate|high", calories_burned: 400, location: "gym name"}
-- medications: {medication_name: "drug name", dose: "500mg", frequency: "twice daily", purpose: "reason"}
-- expenses: {item: "what was bought", amount: 42.50, category: "groceries|dining|transport|etc", vendor: "store name"}
-
-IMPORTANT: Keep each column value atomic. Put the dish/exercise/item NAME in the main column (food, exercise, item). Put restaurant/location, ingredients, category, etc. in separate columns. Do NOT concatenate descriptions into a single field.`,
+      name: 'memorize',
+      description: "Save or delete a fact, experience, or event. Always provide text. Use storage='memory' for unstructured notes (journal, reflections). Use storage='record' (default) with structured data for trackable items. Set category='profile' for identity updates.",
       inputSchema: {
         type: 'object',
         properties: {
-          table: {
-            type: 'string',
-            description: 'Name of the table (e.g., "meals", "workouts", "expenses")',
-          },
-          tableName: {
-            type: 'string',
-            description: 'Deprecated alias for "table".',
-          },
-          data: {
-            type: 'object',
-            description:
-              'Record data as key-value pairs. Use separate columns for each piece of data — new columns are auto-created. Example: {food: "breakfast burrito", restaurant: "Crest Cafe", ingredients: "eggs, bacon, cheese", meal_type: "breakfast", calories: 650}',
-          },
-          tableDescription: {
-            type: 'string',
-            description: 'Optional description of the table (used on first creation)',
-          },
-        },
-        required: ['data'],
-      },
-    },
-    {
-      name: 'search_memory',
-      description: `Search user's saved memories using semantic similarity. Use this when the user asks about past conversations, experiences, notes, or anything they've told you before. Returns relevant memories ranked by similarity.`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          collection: {
-            type: 'string',
-            description: 'Vector collection to search (e.g., "journal", "notes", "conversations")',
-          },
-          query: {
-            type: 'string',
-            description: 'Search query text (will be embedded and compared to stored vectors)',
-          },
-          minSimilarity: {
-            type: 'number',
-            description: 'Minimum cosine similarity threshold (0-1, default 0.7)',
-          },
-          limit: {
-            type: 'number',
-            description: 'Maximum number of results to return (default 10)',
-          },
-        },
-        required: ['collection', 'query'],
-      },
-    },
-    {
-      name: 'save_memory',
-      description: `Save user's experience, note, or important information as a searchable memory. Use this when the user shares experiences, reviews, reflections, ideas, or anything they might want to recall later. Automatically extracts entities and creates graph connections.`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          collection: {
-            type: 'string',
-            description: 'Vector collection (e.g., "journal", "notes", "conversations")',
-          },
           text: {
             type: 'string',
-            description: 'Memory text to save (will be embedded for semantic search)',
+            description: 'The fact/experience to save or forget (always required)',
+          },
+          category: {
+            type: 'string',
+            description: 'Organizer: "books", "meals", "profile", etc.',
+          },
+          data: {
+            type: 'object',
+            description: 'Structured fields (e.g., {title: "Dune", rating: 5})',
+          },
+          action: {
+            type: 'string',
+            enum: ['save', 'delete'],
+            description: 'Default "save"',
+          },
+          storage: {
+            type: 'string',
+            enum: ['record', 'memory'],
+            description: 'Default "record". Use "memory" for vector-only unstructured saves.',
+          },
+          collection: {
+            type: 'string',
+            description: 'For storage "memory": vector collection name. Defaults to category.',
           },
           metadata: {
             type: 'object',
-            description: 'Optional metadata (e.g., {topic: "food", mood: "happy"})',
+            description: 'For storage "memory": optional metadata. Defaults to data.',
           },
         },
-        required: ['collection', 'text'],
+        required: ['text'],
       },
     },
     {
-      name: 'query_graph',
-      description: `Query the knowledge graph to find relationships and patterns. Use this for questions like "Who does Alex know?", "What's related to pizza?", "What food do I like?". Supports multi-hop traversal and pattern matching.`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          queryType: {
-            type: 'string',
-            enum: ['traverse', 'pattern'],
-            description:
-              'Query type: "traverse" for multi-hop navigation, "pattern" for entity/relation patterns',
-          },
-          entityId: {
-            type: 'number',
-            description: 'For traverse: ID of entity to start traversal from',
-          },
-          relation: {
-            type: 'string',
-            description: 'For traverse: relation type to follow (e.g., "likes", "knows")',
-          },
-          maxHops: {
-            type: 'number',
-            description: 'For traverse: maximum hops to traverse (default 2, max 3)',
-          },
-          pattern: {
-            oneOf: [
-              {
-                type: 'string',
-                description: 'Natural-language pattern (e.g., "what food do I like?")',
-              },
-              {
-                type: 'object',
-                description:
-                  'Structured pattern criteria (e.g., {entityType: "food", relation: "likes", targetType: "*"})',
-                properties: {
-                  entityType: { type: 'string' },
-                  entityName: { type: 'string' },
-                  relation: { type: 'string' },
-                  targetType: { type: 'string' },
-                },
-              },
-            ],
-          },
-        },
-        required: ['queryType'],
-      },
-    },
-    {
-      name: 'review_memories',
-      description: `Review and resolve memory contradictions. Use this when data quality issues arise, when the user says "that's not right", or to check for conflicting information. Returns 0-5 contradictions with context. Can confirm, reject, or keep both memories.`,
+      name: 'review',
+      description: 'Check for or resolve memory contradictions. Use "list" to see conflicts, "resolve" with a metaId and resolution to fix one.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -280,48 +174,36 @@ IMPORTANT: Keep each column value atomic. Put the dish/exercise/item NAME in the
           resolution: {
             type: 'string',
             enum: ['confirm', 'reject', 'keep_both'],
-            description:
-              'For resolve: "confirm" to accept, "reject" to deny, "keep_both" to mark as contextual',
+            description: 'For resolve: how to handle the contradiction',
           },
         },
         required: ['action'],
-      },
-    },
-    {
-      name: 'retrieve_user_knowledge',
-      description: `Retrieve everything Epitome knows about a topic. Searches across all data sources (profile, tables, vector memories, knowledge graph) in parallel and returns fused, deduplicated facts with provenance. Use this instead of manually calling list_tables + search_memory + query_graph. Budget controls depth: "small" (fast, 15 facts max), "medium" (default, 40 facts), "deep" (thorough, 80 facts).`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          topic: {
-            type: 'string',
-            description: 'Topic to retrieve knowledge about (e.g., "food preferences", "workout history", "Alex")',
-          },
-          budget: {
-            type: 'string',
-            enum: ['small', 'medium', 'deep'],
-            description: 'Retrieval depth: "small" (fast, 15 facts), "medium" (default, 40), "deep" (thorough, 80)',
-          },
-        },
-        required: ['topic'],
       },
     },
   ];
 }
 
 /**
- * Execute MCP tool call
+ * Execute MCP tool call.
+ *
+ * Returns raw ToolResult so the caller (handler.ts) can distinguish
+ * success from failure and set the appropriate HTTP status code.
  */
 export async function executeTool(
   toolName: string,
   args: unknown,
   context: McpContext
-): Promise<unknown> {
-  const tool = TOOLS[toolName as keyof typeof TOOLS];
-
-  if (!tool) {
+): Promise<toolServices.ToolResult> {
+  const facadeTool = FACADE_TOOLS[toolName];
+  if (!facadeTool) {
     throw new Error(`TOOL_NOT_FOUND: Unknown tool '${toolName}'`);
   }
 
-  return await (tool as (args: unknown, context: McpContext) => Promise<unknown>)(args, context);
+  const toolContext = buildToolContext({
+    userId: context.userId,
+    agentId: context.agentId,
+    tier: context.tier,
+    authType: 'api_key',
+  });
+  return facadeTool(args, toolContext);
 }

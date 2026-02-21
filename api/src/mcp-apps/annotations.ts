@@ -5,14 +5,7 @@ export const TOOL_ANNOTATIONS: Record<string, {
   destructiveHint: boolean;
   openWorldHint: boolean;
 }> = {
-  get_user_context: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  list_tables:      { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  query_table:      { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  search_memory:    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  query_graph:      { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  review_memories:  { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  update_profile:   { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  add_record:       { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  save_memory:      { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  retrieve_user_knowledge: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  recall:    { readOnlyHint: true,  destructiveHint: false, openWorldHint: true },
+  memorize:  { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  review:    { readOnlyHint: false, destructiveHint: true,  openWorldHint: true },
 };

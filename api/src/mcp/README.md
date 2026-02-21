@@ -22,8 +22,8 @@ List all available tools with their schemas.
 {
   "tools": [
     {
-      "name": "get_user_context",
-      "description": "Load user's profile, preferences, and recent context...",
+      "name": "recall",
+      "description": "Retrieve information Epitome knows about a topic...",
       "inputSchema": { ... }
     },
     ...
@@ -70,160 +70,116 @@ Execute a specific MCP tool.
 
 OAuth 2.0 authorization server metadata for AI platforms that support MCP OAuth.
 
-## The 9 MCP Tools
+## The 3 MCP Tools
 
-### 1. get_user_context
+Epitome exposes 3 intent-based facade tools that internally delegate to the appropriate service-layer functions. This keeps the tool surface small and easy for agents to reason about.
 
-**Purpose:** Load user profile + top entities + recent memories within ~2000 token budget
+### 1. recall
+
+**Purpose:** Retrieve information from all data sources.
 
 **Arguments:**
-- `topic` (optional): Topic for relevance ranking
+- `topic` (optional): What to search for. Empty = general context at conversation start.
+- `budget` (optional): `"small"` | `"medium"` | `"deep"` — retrieval depth.
+- `mode` (optional): `"context"` | `"knowledge"` | `"memory"` | `"graph"` | `"table"` — explicit routing.
+- `memory` (optional): For mode `"memory"` — `{ collection, query, minSimilarity?, limit? }`
+- `graph` (optional): For mode `"graph"` — `{ queryType, entityId?, relation?, maxHops?, pattern? }`
+- `table` (optional): For mode `"table"` — `{ table?, filters?, sql?, limit?, offset? }`
 
-**Returns:**
-- User profile data
-- Table inventory
-- Vector collection list
-- Top 20 entities by composite score
-- Last 10 memories
+**Default behavior (no mode):**
+- No topic → loads user context (profile, tables, collections, entities, hints)
+- With topic → federated search across all sources with fusion ranking
 
-**Consent Required:** `profile:read`
+**Advanced modes:**
+- `mode:"memory"` → collection-specific vector search (requires `memory` object)
+- `mode:"graph"` → graph traversal or pattern matching (requires `graph` object)
+- `mode:"table"` → sandboxed SQL or filter-based table query (requires `table` object)
 
-**Example:**
+**Consent Required:** Depends on routing — `profile:read`, `tables:read`, `vectors:read`, or `graph:read`
+
+**Examples:**
 ```bash
-curl -X POST http://localhost:3000/mcp/call/get_user_context \
+# Load user context at conversation start
+curl -X POST http://localhost:3000/mcp/call/recall \
   -H "Authorization: Bearer epi_..." \
   -H "Content-Type: application/json" \
   -d '{}'
-```
 
-### 2. update_profile
-
-**Purpose:** Update user profile with deep-merge (RFC 7396)
-
-**Arguments:**
-- `data` (required): Partial profile data to merge
-- `reason` (optional): Description of what changed
-
-**Returns:** Updated profile
-
-**Consent Required:** `profile:write`
-
-**Example:**
-```bash
-curl -X POST http://localhost:3000/mcp/call/update_profile \
+# Federated search for a topic
+curl -X POST http://localhost:3000/mcp/call/recall \
   -H "Authorization: Bearer epi_..." \
   -H "Content-Type: application/json" \
-  -d '{
-    "data": {
-      "preferences": {
-        "dietary": ["vegetarian"]
-      }
-    },
-    "reason": "user mentioned new dietary preference"
-  }'
+  -d '{"topic": "food preferences"}'
+
+# Direct vector search
+curl -X POST http://localhost:3000/mcp/call/recall \
+  -H "Authorization: Bearer epi_..." \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "memory", "memory": {"collection": "journal", "query": "coffee"}}'
+
+# SQL query against a specific table
+curl -X POST http://localhost:3000/mcp/call/recall \
+  -H "Authorization: Bearer epi_..." \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "table", "table": {"table": "meals", "sql": "SELECT * FROM meals WHERE calories > 500 LIMIT 10"}}'
 ```
 
-### 3. list_tables
+### 2. memorize
 
-**Purpose:** List all user tables with metadata
-
-**Arguments:** None
-
-**Returns:** Array of table metadata
-
-**Consent Required:** `tables/*:read`
-
-### 4. query_table
-
-**Purpose:** Query table records with filters or SQL
+**Purpose:** Save or delete a fact, experience, or event.
 
 **Arguments:**
-- `tableName` (required): Table name
-- `filters` (optional): Structured filters
-- `sql` (optional): Read-only SQL query
-- `limit` (optional): Max results (default 50, max 1000)
-- `offset` (optional): Pagination offset
+- `text` (required): The fact/experience to save or forget.
+- `category` (optional): Organizer — `"books"`, `"meals"`, `"profile"`, etc.
+- `data` (optional): Structured fields (e.g., `{title: "Dune", rating: 5}`)
+- `action` (optional): `"save"` (default) or `"delete"`
+- `storage` (optional): `"record"` (default) or `"memory"` — `"memory"` = vector-only save.
+- `collection` (optional): For `storage:"memory"` — vector collection name. Defaults to category.
+- `metadata` (optional): For `storage:"memory"` — optional metadata. Defaults to data.
 
-**Returns:** Array of records
+**Routing order:**
+1. Validate text (empty → INVALID_ARGS)
+2. `action:"delete"` → semantic search + soft-delete matching vectors
+3. `storage:"memory"` → vector-only save via saveMemory
+4. `category:"profile"` → deep-merge profile update
+5. Default → addRecord (dual-writes table row + auto-vectorized memory)
 
-**Consent Required:** `tables/<tableName>:read`
-
-### 5. add_record
-
-**Purpose:** Insert a record into a table (auto-creates table/columns)
-
-**Arguments:**
-- `tableName` (required): Table name
-- `data` (required): Record data as key-value pairs
-- `tableDescription` (optional): Table description
-
-**Returns:** Created record
-
-**Consent Required:** `tables/<tableName>:write`
+**Consent Required:** `tables:write`, `vectors:write`, or `profile:write` (depends on route)
 
 **Side Effects:**
-- Auto-creates table if doesn't exist
-- Auto-adds columns for new fields
+- Auto-creates tables/columns for new data
 - Triggers async entity extraction (non-blocking)
+- Checks for contradictions after save
 
-### 6. search_memory
+**Examples:**
+```bash
+# Save a structured record
+curl -X POST http://localhost:3000/mcp/call/memorize \
+  -H "Authorization: Bearer epi_..." \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Finished reading Dune", "category": "books", "data": {"title": "Dune", "rating": 5}}'
 
-**Purpose:** Semantic search across vector collections
+# Save a journal entry (vector-only)
+curl -X POST http://localhost:3000/mcp/call/memorize \
+  -H "Authorization: Bearer epi_..." \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Had a wonderful sunset walk today", "storage": "memory", "collection": "journal"}'
 
-**Arguments:**
-- `collection` (required): Collection name
-- `query` (required): Search query text
-- `minSimilarity` (optional): Min threshold (default 0.7)
-- `limit` (optional): Max results (default 10)
+# Update profile
+curl -X POST http://localhost:3000/mcp/call/memorize \
+  -H "Authorization: Bearer epi_..." \
+  -H "Content-Type: application/json" \
+  -d '{"text": "I am vegetarian", "category": "profile", "data": {"dietary": ["vegetarian"]}}'
+```
 
-**Returns:** Array of matching memories with similarity scores
+### 3. review
 
-**Consent Required:** `vectors/<collection>:read`
-
-### 7. save_memory
-
-**Purpose:** Save a memory vector with embedding generation
-
-**Arguments:**
-- `collection` (required): Collection name
-- `text` (required): Memory text
-- `metadata` (optional): Additional metadata
-
-**Returns:** Vector ID
-
-**Consent Required:** `vectors/<collection>:write`
-
-**Side Effects:**
-- Generates embedding via OpenAI API
-- Triggers async entity extraction (non-blocking)
-- Triggers async thread linking (non-blocking)
-
-### 8. query_graph
-
-**Purpose:** Graph traversal and pattern-based queries
+**Purpose:** Check for or resolve memory contradictions.
 
 **Arguments:**
-- `queryType` (required): "traverse" or "pattern"
-- For traverse:
-  - `entityId` (required): Starting entity ID
-  - `relation` (optional): Relation type to follow
-  - `maxHops` (optional): Max hops (default 2, max 3)
-- For pattern:
-  - `pattern` (required): Search criteria object
-
-**Returns:** Entities and edges matching the query
-
-**Consent Required:** `graph:read`
-
-### 9. review_memories
-
-**Purpose:** Get and resolve memory contradictions
-
-**Arguments:**
-- `action` (required): "list" or "resolve"
-- For resolve:
-  - `metaId` (required): Memory meta ID
-  - `resolution` (required): "confirm", "reject", or "keep_both"
+- `action` (required): `"list"` or `"resolve"`
+- `metaId` (optional): For resolve — ID of memory_meta entry
+- `resolution` (optional): `"confirm"` | `"reject"` | `"keep_both"`
 
 **Returns:**
 - For list: Array of contradictions (max 5)
@@ -232,6 +188,14 @@ curl -X POST http://localhost:3000/mcp/call/update_profile \
 **Consent Required:**
 - List: `memory:read`
 - Resolve: `memory:write`
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/mcp/call/review \
+  -H "Authorization: Bearer epi_..." \
+  -H "Content-Type: application/json" \
+  -d '{"action": "list"}'
+```
 
 ## Authentication Flow
 
@@ -255,10 +219,10 @@ Every MCP tool invocation:
 ## Error Codes
 
 - `UNAUTHORIZED` (401): Missing/invalid API key
-- `FORBIDDEN` (403): No consent for resource
 - `CONSENT_DENIED` (403): Agent lacks required permission
 - `NOT_FOUND` (404): Tool not found
 - `INVALID_ARGS` (400): Missing or invalid arguments
+- `RATE_LIMITED` (429): Rate limit exceeded
 - `INTERNAL_ERROR` (500): Server error
 
 ## System Prompt Template
@@ -268,12 +232,12 @@ Provide this to users for configuring their AI:
 ```
 I have Epitome connected with my personal data, including a profile,
 data tables, semantic memories, and a knowledge graph of my preferences
-and relationships. At the start of conversations, call get_user_context
-to load my profile and understand what data I track. When I share new
-personal info, save it automatically (don't ask to confirm). When I ask
-about patterns, relationships, or history, use query_graph and query_table
-to find connections. If something I say contradicts what you know about me,
-note it — Epitome handles conflicts automatically.
+and relationships. At the start of conversations, call recall() with no
+arguments to load my profile and understand what data I track. When I share
+new personal info, save it with memorize(). When I ask about patterns,
+relationships, or history, use recall() with a topic or specific mode.
+If something I say contradicts what you know about me, note it — Epitome
+handles conflicts automatically via review().
 ```
 
 ## Development
@@ -284,32 +248,18 @@ note it — Epitome handles conflicts automatically.
 # List tools
 curl http://localhost:3000/mcp/tools
 
-# Call get_user_context
-curl -X POST http://localhost:3000/mcp/call/get_user_context \
+# Load user context
+curl -X POST http://localhost:3000/mcp/call/recall \
   -H "Authorization: Bearer epi_..." \
   -H "Content-Type: application/json" \
   -d '{}'
 
-# Add a meal record
-curl -X POST http://localhost:3000/mcp/call/add_record \
+# Save a memory
+curl -X POST http://localhost:3000/mcp/call/memorize \
   -H "Authorization: Bearer epi_..." \
   -H "Content-Type: application/json" \
-  -d '{
-    "tableName": "meals",
-    "data": {
-      "food": "pizza",
-      "calories": 800,
-      "date": "2026-02-12"
-    }
-  }'
+  -d '{"text": "Had pizza for dinner", "category": "meals", "data": {"food": "pizza", "calories": 800}}'
 ```
-
-### Adding New Tools
-
-1. Create tool handler in `src/mcp/tools/<toolName>.ts`
-2. Export async function matching signature: `(args: any, context: McpContext) => Promise<any>`
-3. Add tool to registry in `src/mcp/server.ts`
-4. Add tool definition to `getToolDefinitions()` in `src/mcp/server.ts`
 
 ## References
 

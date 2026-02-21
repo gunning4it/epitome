@@ -135,26 +135,26 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     const body = await parseResponse(response);
     expect(body.result).toBeDefined();
     expect(body.result.tools).toBeInstanceOf(Array);
-    expect(body.result.tools.length).toBe(10);
+    expect(body.result.tools.length).toBe(3);
 
-    // Check that annotations exist on tools
-    const listTables = body.result.tools.find((t: any) => t.name === 'list_tables');
-    expect(listTables).toBeDefined();
-    expect(listTables.annotations).toBeDefined();
-    expect(listTables.annotations.readOnlyHint).toBe(true);
-    expect(listTables.annotations.destructiveHint).toBe(false);
+    // Check that annotations exist on recall (read-only)
+    const recall = body.result.tools.find((t: any) => t.name === 'recall');
+    expect(recall).toBeDefined();
+    expect(recall.annotations).toBeDefined();
+    expect(recall.annotations.readOnlyHint).toBe(true);
+    expect(recall.annotations.destructiveHint).toBe(false);
 
     // Write tools should not be readOnly
-    const addRecord = body.result.tools.find((t: any) => t.name === 'add_record');
-    expect(addRecord).toBeDefined();
-    expect(addRecord.annotations.readOnlyHint).toBe(false);
+    const memorize = body.result.tools.find((t: any) => t.name === 'memorize');
+    expect(memorize).toBeDefined();
+    expect(memorize.annotations.readOnlyHint).toBe(false);
   });
 
-  it('returns structuredContent for list_tables', async () => {
+  it('returns structuredContent for recall (no topic)', async () => {
     const response = await jsonRpc(
       app,
       'tools/call',
-      { name: 'list_tables', arguments: {} },
+      { name: 'recall', arguments: {} },
       authHeaders(testUser.userId),
     );
 
@@ -164,21 +164,6 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     expect(body.result.content).toBeInstanceOf(Array);
     expect(body.result.content[0].type).toBe('text');
     // structuredContent should be present (chatgptAdapter feature)
-    expect(body.result.structuredContent).toBeDefined();
-  });
-
-  it('returns structuredContent for get_user_context', async () => {
-    const response = await jsonRpc(
-      app,
-      'tools/call',
-      { name: 'get_user_context', arguments: {} },
-      authHeaders(testUser.userId),
-    );
-
-    expect(response.status).toBe(200);
-    const body = await parseResponse(response);
-    expect(body.result).toBeDefined();
-    expect(body.result.content).toBeInstanceOf(Array);
     expect(body.result.structuredContent).toBeDefined();
     // structuredContent should contain profile data
     expect(body.result.structuredContent).toHaveProperty('profile');
@@ -191,7 +176,7 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     const response = await jsonRpc(
       app,
       'tools/call',
-      { name: 'list_tables', arguments: {} },
+      { name: 'memorize', arguments: { text: 'delete this', action: 'delete' } },
       authHeaders(testUser.userId),
     );
 
@@ -202,7 +187,7 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     expect(body.result.content[0].text).toMatch(/CONSENT_DENIED/i);
   });
 
-  it('all 10 tools are registered with correct names', async () => {
+  it('all 3 tools are registered with correct names', async () => {
     const response = await jsonRpc(
       app,
       'tools/list',
@@ -214,16 +199,9 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     const toolNames = body.result.tools.map((t: any) => t.name).sort();
 
     expect(toolNames).toEqual([
-      'add_record',
-      'get_user_context',
-      'list_tables',
-      'query_graph',
-      'query_table',
-      'retrieve_user_knowledge',
-      'review_memories',
-      'save_memory',
-      'search_memory',
-      'update_profile',
+      'memorize',
+      'recall',
+      'review',
     ]);
   });
 });

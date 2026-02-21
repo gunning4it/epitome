@@ -1,7 +1,7 @@
 /**
  * MCP Protocol Server Factory
  *
- * Creates a McpServer instance with all 10 tools registered using the
+ * Creates a McpServer instance with 3 intent-based facade tools using the
  * official @modelcontextprotocol/sdk. Used by the Streamable HTTP handler
  * to speak proper JSON-RPC 2.0 with Claude Desktop and other MCP clients.
  */
@@ -11,37 +11,16 @@ import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import type { McpContext } from './server.js';
 
-// Tool handlers (legacy path)
-import { getUserContext } from './tools/getUserContext.js';
-import { updateProfile } from './tools/updateProfile.js';
-import { listTables } from './tools/listTables.js';
-import { queryTable } from './tools/queryTable.js';
-import { addRecord } from './tools/addRecord.js';
-import { searchMemory } from './tools/searchMemory.js';
-import { saveMemory } from './tools/saveMemory.js';
-import { queryGraph } from './tools/queryGraph.js';
-import { reviewMemories } from './tools/reviewMemories.js';
-import { retrieveUserKnowledge } from './tools/retrieveUserKnowledge.js';
-
-// Service layer (feature-flagged path)
+// Service layer (always used)
 import * as toolServices from '@/services/tools/index.js';
 import { mcpAdapter } from '@/services/tools/adapters.js';
 import { buildToolContext } from '@/services/tools/context.js';
 
-const USE_SERVICE_LAYER = process.env.MCP_USE_SERVICE_LAYER === 'true';
-
 // Map tool names to service functions
 const SERVICE_MAP: Record<string, (args: any, ctx: toolServices.ToolContext) => Promise<toolServices.ToolResult>> = {
-  get_user_context: toolServices.getUserContext,
-  update_profile: toolServices.updateProfile,
-  list_tables: toolServices.listTables,
-  query_table: toolServices.queryTable,
-  add_record: toolServices.addRecord,
-  search_memory: toolServices.searchMemory,
-  save_memory: toolServices.saveMemory,
-  query_graph: toolServices.queryGraph,
-  review_memories: toolServices.reviewMemories,
-  retrieve_user_knowledge: toolServices.retrieveUserKnowledge,
+  recall: toolServices.recall,
+  memorize: toolServices.memorize,
+  review: toolServices.review,
 };
 
 /**
@@ -61,18 +40,23 @@ function extractContext(extra: Record<string, unknown>): McpContext {
 }
 
 /**
- * Wrap a tool handler: extract auth context, call handler, return CallToolResult format.
- * When USE_SERVICE_LAYER is true and toolName is provided, routes through the
- * transport-agnostic service layer instead of the legacy handler.
+ * Route a tool call through the service layer.
+ * Always uses SERVICE_MAP — no legacy fallback.
  */
 async function callTool(
-  handler: (args: any, context: McpContext) => Promise<unknown>,
   args: Record<string, unknown>,
   extra: Record<string, unknown>,
-  toolName?: string,
+  toolName: string,
 ): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
-  // Service layer path (feature-flagged)
-  if (USE_SERVICE_LAYER && toolName && SERVICE_MAP[toolName]) {
+  const serviceFn = SERVICE_MAP[toolName];
+  if (!serviceFn) {
+    return {
+      content: [{ type: 'text', text: `TOOL_NOT_FOUND: Unknown tool '${toolName}'.` }],
+      isError: true,
+    };
+  }
+
+  try {
     const rawContext = extractContext(extra);
     const toolContext = buildToolContext({
       userId: rawContext.userId,
@@ -80,20 +64,11 @@ async function callTool(
       tier: rawContext.tier,
       authType: 'api_key',
     });
-    const result = await SERVICE_MAP[toolName](args, toolContext);
+    const result = await serviceFn(args, toolContext);
     return mcpAdapter(result);
-  }
-
-  // Legacy path (default)
-  try {
-    const context = extractContext(extra);
-    const result = await handler(args, context);
-    return {
-      content: [{ type: 'text', text: JSON.stringify(result) }],
-    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logger.error('MCP protocol tool error', { error: message });
+    logger.error('MCP protocol tool error', { error: message, toolName });
     return {
       content: [{ type: 'text', text: message }],
       isError: true,
@@ -102,7 +77,7 @@ async function callTool(
 }
 
 /**
- * Create a new McpServer with all 10 Epitome tools registered.
+ * Create a new McpServer with 3 facade Epitome tools registered.
  * Each request gets its own server instance (stateless mode).
  */
 export function createMcpProtocolServer(): McpServer {
@@ -111,148 +86,26 @@ export function createMcpProtocolServer(): McpServer {
     version: '1.0.0',
   });
 
-  // 1. get_user_context
-  server.registerTool('get_user_context', {
+  // 1. recall
+  server.registerTool('recall', {
     description:
-      "Load user's profile, preferences, and recent context. Call this at the start of every conversation to understand what you know about the user. Returns profile summary, top entities by relevance and confidence, table inventory, and vector collection list.",
+      "Retrieve information Epitome knows about a topic. Default: leave topic empty for user context, provide topic for federated search. Advanced: set mode to 'memory', 'graph', or 'table' with the corresponding options object for direct queries (e.g., SQL via mode='table').",
     inputSchema: {
-      topic: z
-        .string()
-        .optional()
-        .describe('Optional topic for relevance ranking (e.g., "food preferences", "workout history")'),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      openWorldHint: true,
-    },
-  }, async (args, extra) => callTool(getUserContext, args, extra, 'get_user_context'));
-
-  // 2. update_profile
-  server.registerTool('update_profile', {
-    description:
-      "Update user profile fields. Use this when the user shares personal information like allergies, dietary preferences, family members, timezone, job, or any other profile data. Deep-merges new data with existing profile. Returns updated profile.",
-    inputSchema: {
-      data: z
-        .record(z.string(), z.unknown())
-        .describe('Partial profile data to merge. Supports nested updates like {preferences: {dietary: ["vegetarian"]}}'),
-      reason: z
-        .string()
-        .optional()
-        .describe('Optional description of what changed (e.g., "user mentioned new allergy")'),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: true,
-      openWorldHint: true,
-    },
-  }, async (args, extra) => callTool(updateProfile, args, extra, 'update_profile'));
-
-  // 3. list_tables
-  server.registerTool('list_tables', {
-    description:
-      "List all data tables the user tracks (meals, workouts, expenses, habits, etc.). Returns table names, descriptions, column schemas, and record counts. Use this to discover what data is available before querying.",
-    inputSchema: {},
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      openWorldHint: true,
-    },
-  }, async (args, extra) => callTool(listTables, args, extra, 'list_tables'));
-
-  // 4. query_table
-  server.registerTool('query_table', {
-    description:
-      "Query records from a data table. Use structured filters for simple queries or SQL for complex analysis. Supports pagination. Returns matching records with metadata.",
-    inputSchema: {
-      table: z.string().optional().describe('Name of the table to query (e.g., "meals", "workouts")'),
-      tableName: z.string().optional().describe('Deprecated alias for "table".'),
-      filters: z
-        .record(z.string(), z.unknown())
-        .optional()
-        .describe('Structured filters as key-value pairs (e.g., {date: "2024-01-15", category: "dinner"})'),
-      sql: z
-        .string()
-        .optional()
-        .describe('Optional SQL SELECT query (read-only, sandboxed). Use for complex queries with JOINs, aggregations, etc.'),
-      limit: z.number().optional().describe('Maximum number of results to return (default 50, max 1000)'),
-      offset: z.number().optional().describe('Number of results to skip for pagination'),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      openWorldHint: true,
-    },
-  }, async (args, extra) => callTool(queryTable, args, extra, 'query_table'));
-
-  // 5. add_record
-  server.registerTool('add_record', {
-    description:
-      "Add a new record to a table. Tables and columns are auto-created if they don't exist. Use this when the user logs meals, workouts, expenses, habits, medications, or any trackable data. Automatically extracts entities and creates graph connections.",
-    inputSchema: {
-      table: z.string().optional().describe('Name of the table (e.g., "meals", "workouts", "expenses")'),
-      tableName: z.string().optional().describe('Deprecated alias for "table".'),
-      data: z
-        .record(z.string(), z.unknown())
-        .describe('Record data as key-value pairs (e.g., {food: "pizza", calories: 800})'),
-      tableDescription: z.string().optional().describe('Optional description of the table (used on first creation)'),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      openWorldHint: true,
-    },
-  }, async (args, extra) => callTool(addRecord, args, extra, 'add_record'));
-
-  // 6. search_memory
-  server.registerTool('search_memory', {
-    description:
-      "Search user's saved memories using semantic similarity. Use this when the user asks about past conversations, experiences, notes, or anything they've told you before. Returns relevant memories ranked by similarity.",
-    inputSchema: {
-      collection: z.string().describe('Vector collection to search (e.g., "journal", "notes", "conversations")'),
-      query: z.string().describe('Search query text (will be embedded and compared to stored vectors)'),
-      minSimilarity: z.number().optional().describe('Minimum cosine similarity threshold (0-1, default 0.7)'),
-      limit: z.number().optional().describe('Maximum number of results to return (default 10)'),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      openWorldHint: true,
-    },
-  }, async (args, extra) => callTool(searchMemory, args, extra, 'search_memory'));
-
-  // 7. save_memory
-  server.registerTool('save_memory', {
-    description:
-      "Save user's experience, note, or important information as a searchable memory. Use this when the user shares experiences, reviews, reflections, ideas, or anything they might want to recall later. Automatically extracts entities and creates graph connections.",
-    inputSchema: {
-      collection: z.string().describe('Vector collection (e.g., "journal", "notes", "conversations")'),
-      text: z.string().describe('Memory text to save (will be embedded for semantic search)'),
-      metadata: z
-        .record(z.string(), z.unknown())
-        .optional()
-        .describe('Optional metadata (e.g., {topic: "food", mood: "happy"})'),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      openWorldHint: true,
-    },
-  }, async (args, extra) => callTool(saveMemory, args, extra, 'save_memory'));
-
-  // 8. query_graph
-  server.registerTool('query_graph', {
-    description:
-      'Query the knowledge graph to find relationships and patterns. Use this for questions like "Who does Alex know?", "What\'s related to pizza?", "What food do I like?". Supports multi-hop traversal and pattern matching.',
-    inputSchema: {
-      queryType: z
-        .enum(['traverse', 'pattern'])
-        .describe('Query type: "traverse" for multi-hop navigation, "pattern" for entity/relation patterns'),
-      entityId: z.number().optional().describe('For traverse: ID of entity to start traversal from'),
-      relation: z.string().optional().describe('For traverse: relation type to follow (e.g., "likes", "knows")'),
-      maxHops: z.number().optional().describe('For traverse: maximum hops to traverse (default 2, max 3)'),
-      pattern: z
-        .union([
+      topic: z.string().optional().describe('What to search for. Empty = general context at conversation start.'),
+      budget: z.enum(['small', 'medium', 'deep']).optional().describe('small=quick, medium=default, deep=research only'),
+      mode: z.enum(['context', 'knowledge', 'memory', 'graph', 'table']).optional().describe('Routing mode. Default: auto (no topic=context, topic=knowledge).'),
+      memory: z.object({
+        collection: z.string().describe('Vector collection to search'),
+        query: z.string().describe('Search query text'),
+        minSimilarity: z.number().optional().describe('Min cosine similarity (0-1, default 0.7)'),
+        limit: z.number().optional().describe('Max results (default 10)'),
+      }).optional().describe('For mode "memory": vector search options'),
+      graph: z.object({
+        queryType: z.enum(['traverse', 'pattern']).describe('Query type'),
+        entityId: z.number().optional().describe('For traverse: starting entity ID'),
+        relation: z.string().optional().describe('For traverse: relation type to follow'),
+        maxHops: z.number().optional().describe('For traverse: max hops (default 2, max 3)'),
+        pattern: z.union([
           z.string().min(1),
           z.object({
             entityType: z.string().optional(),
@@ -260,59 +113,59 @@ export function createMcpProtocolServer(): McpServer {
             relation: z.string().optional(),
             targetType: z.string().optional(),
           }),
-        ])
-        .optional()
-        .describe('For pattern: either natural language string or structured criteria object'),
+        ]).optional().describe('For pattern: natural language or structured criteria'),
+      }).optional().describe('For mode "graph": graph query options'),
+      table: z.object({
+        table: z.string().optional().describe('Table name'),
+        tableName: z.string().optional().describe('Deprecated alias for "table"'),
+        filters: z.record(z.string(), z.unknown()).optional().describe('Structured filters'),
+        sql: z.string().optional().describe('SQL SELECT query (read-only, sandboxed)'),
+        limit: z.number().optional().describe('Max results (default 50, max 1000)'),
+        offset: z.number().optional().describe('Pagination offset'),
+      }).optional().describe('For mode "table": table query options'),
     },
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
       openWorldHint: true,
     },
-  }, async (args, extra) => callTool(queryGraph, args, extra, 'query_graph'));
+  }, async (args, extra) => callTool(args, extra, 'recall'));
 
-  // 9. review_memories
-  server.registerTool('review_memories', {
+  // 2. memorize
+  server.registerTool('memorize', {
     description:
-      'Review and resolve memory contradictions. Use this when data quality issues arise, when the user says "that\'s not right", or to check for conflicting information. Returns 0-5 contradictions with context. Can confirm, reject, or keep both memories.',
+      "Save or delete a fact, experience, or event. Always provide text. Use storage='memory' for unstructured notes (journal, reflections). Use storage='record' (default) with structured data for trackable items. Set category='profile' for identity updates.",
     inputSchema: {
-      action: z
-        .enum(['list', 'resolve'])
-        .describe('Action: "list" to get contradictions, "resolve" to fix one'),
+      text: z.string().min(1).describe('The fact/experience to save or forget (always required)'),
+      category: z.string().optional().describe('Organizer: "books", "meals", "profile", etc.'),
+      data: z.record(z.string(), z.unknown()).optional().describe('Structured fields (e.g., {title: "Dune", rating: 5})'),
+      action: z.enum(['save', 'delete']).optional().describe('Default "save"'),
+      storage: z.enum(['record', 'memory']).optional().describe('Default "record". Use "memory" for vector-only unstructured saves.'),
+      collection: z.string().optional().describe('For storage "memory": vector collection name. Defaults to category.'),
+      metadata: z.record(z.string(), z.unknown()).optional().describe('For storage "memory": optional metadata. Defaults to data.'),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: true,
+    },
+  }, async (args, extra) => callTool(args, extra, 'memorize'));
+
+  // 3. review
+  server.registerTool('review', {
+    description:
+      'Check for or resolve memory contradictions. Use "list" to see conflicts, "resolve" with a metaId and resolution to fix one.',
+    inputSchema: {
+      action: z.enum(['list', 'resolve']).describe('Action: "list" to get contradictions, "resolve" to fix one'),
       metaId: z.number().optional().describe('For resolve: ID of memory_meta entry to resolve'),
-      resolution: z
-        .enum(['confirm', 'reject', 'keep_both'])
-        .optional()
-        .describe('For resolve: "confirm" to accept, "reject" to deny, "keep_both" to mark as contextual'),
+      resolution: z.enum(['confirm', 'reject', 'keep_both']).optional().describe('For resolve: how to handle the contradiction'),
     },
     annotations: {
       readOnlyHint: false,
       destructiveHint: true,
       openWorldHint: true,
     },
-  }, async (args, extra) => callTool(reviewMemories, args, extra, 'review_memories'));
-
-  // 10. retrieve_user_knowledge
-  server.registerTool('retrieve_user_knowledge', {
-    description:
-      'Retrieve everything Epitome knows about a topic. Searches across all data sources (profile, tables, vector memories, knowledge graph) in parallel and returns fused, deduplicated facts with provenance. Use this instead of manually calling list_tables + search_memory + query_graph. Budget controls depth: "small" (fast, 15 facts max), "medium" (default, 40 facts), "deep" (thorough, 80 facts).',
-    inputSchema: {
-      topic: z
-        .string()
-        .min(1)
-        .max(500)
-        .describe('Topic to retrieve knowledge about (e.g., "food preferences", "workout history", "Alex")'),
-      budget: z
-        .enum(['small', 'medium', 'deep'])
-        .optional()
-        .describe('Retrieval depth: "small" (fast, 15 facts), "medium" (default, 40), "deep" (thorough, 80)'),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      openWorldHint: true,
-    },
-  }, async (args, extra) => callTool(retrieveUserKnowledge, args, extra, 'retrieve_user_knowledge'));
+  }, async (args, extra) => callTool(args, extra, 'review'));
 
   return server;
 }

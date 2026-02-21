@@ -293,12 +293,31 @@ export function createMcpRoutes(): Hono<HonoEnv> {
         );
       }
 
-      // Execute tool
+      // Execute tool — returns ToolResult (success or failure)
       const result = await executeTool(toolName, args, context);
+
+      if (!result.success) {
+        const statusCode =
+          result.code === 'CONSENT_DENIED' ? 403 :
+          result.code === 'NOT_FOUND' ? 404 :
+          result.code === 'INVALID_ARGS' ? 400 :
+          result.code === 'RATE_LIMITED' ? 429 : 500;
+
+        return c.json(
+          {
+            success: false,
+            error: {
+              code: result.code,
+              message: result.message,
+            },
+          },
+          statusCode,
+        );
+      }
 
       return c.json({
         success: true,
-        result,
+        result: result.data,
       });
     } catch (error: unknown) {
       logger.error('MCP call error', { tool: toolName, error: String(error) });

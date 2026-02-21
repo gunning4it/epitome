@@ -295,7 +295,7 @@ describe('Data Access Security Fixes', () => {
         permission: 'read',
       });
 
-      const response = await app.request('/mcp/call/get_user_context', {
+      const response = await app.request('/mcp/call/recall', {
         method: 'POST',
         headers,
         body: JSON.stringify([1, 2, 3]),
@@ -321,7 +321,7 @@ describe('Data Access Security Fixes', () => {
         permission: 'read',
       });
 
-      const response = await app.request('/mcp/call/get_user_context', {
+      const response = await app.request('/mcp/call/recall', {
         method: 'POST',
         headers,
         body: JSON.stringify({ topic: 'food' }),
@@ -330,6 +330,40 @@ describe('Data Access Security Fixes', () => {
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body.success).toBe(true);
+    });
+
+    it('should return 403 with success:false when consent is denied', async () => {
+      const headers = createTestAuthHeaders(testUser);
+
+      // No consent granted — memorize delete requires vectors:write
+      const response = await app.request('/mcp/call/memorize', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ text: 'delete this', action: 'delete' }),
+      });
+
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body.success).toBe(false);
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe('CONSENT_DENIED');
+      expect(body.error.message).toMatch(/CONSENT_DENIED/);
+    });
+
+    it('should return 400 with success:false for INVALID_ARGS', async () => {
+      const headers = createTestAuthHeaders(testUser);
+
+      const response = await app.request('/mcp/call/memorize', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ text: '' }),
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.success).toBe(false);
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe('INVALID_ARGS');
     });
   });
 

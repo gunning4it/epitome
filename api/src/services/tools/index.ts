@@ -9,6 +9,9 @@ export { updateProfile } from './updateProfile.js';
 export { addRecord } from './addRecord.js';
 export { saveMemory } from './saveMemory.js';
 export { retrieveUserKnowledge } from './retrieveUserKnowledge.js';
+export { recall } from './recall.js';
+export { memorize } from './memorize.js';
+export { review } from './review.js';
 
 export * from './types.js';
 export * from './adapters.js';
