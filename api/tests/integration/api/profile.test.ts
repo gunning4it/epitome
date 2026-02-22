@@ -377,4 +377,66 @@ describe('Profile API Integration Tests', () => {
       expect(response.status).toBe(401);
     });
   });
+
+  // ---------------------------------------------------
+  // Phase 0 — red baseline: identity safety
+  // ---------------------------------------------------
+  describe('Phase 0 — red baseline: identity safety', () => {
+    it('should block agent from setting profile.name to a known family member name', async () => {
+      // First, set up profile with family data
+      await app.request('/v1/profile', {
+        method: 'PATCH',
+        headers: createTestAuthHeaders(testUser),
+        body: JSON.stringify({
+          body: {
+            name: 'Bruce Wayne',
+            family: [
+              { name: 'Georgia', relation: 'daughter' },
+            ],
+          },
+        }),
+      });
+
+      // Now, agent tries to set name to 'Georgia' (a family member)
+      const response = await app.request('/v1/profile', {
+        method: 'PATCH',
+        headers: createTestAuthHeaders(testUser),
+        body: JSON.stringify({
+          body: { name: 'Georgia' },
+        }),
+      });
+
+      // Should be blocked with identity violation
+      expect(response.status).toBe(409);
+      const json = await response.json() as any;
+      expect(json.error).toMatch(/identity/i);
+    });
+
+    it('should allow agent to set profile.name to a non-family name', async () => {
+      // Set up profile with family data
+      await app.request('/v1/profile', {
+        method: 'PATCH',
+        headers: createTestAuthHeaders(testUser),
+        body: JSON.stringify({
+          body: {
+            name: 'Bruce Wayne',
+            family: [
+              { name: 'Georgia', relation: 'daughter' },
+            ],
+          },
+        }),
+      });
+
+      // Agent sets name to a non-family name
+      const response = await app.request('/v1/profile', {
+        method: 'PATCH',
+        headers: createTestAuthHeaders(testUser),
+        body: JSON.stringify({
+          body: { name: 'Bruce Thomas Wayne' },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+    });
+  });
 });

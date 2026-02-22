@@ -18,8 +18,9 @@
  */
 
 import { searchAllVectors } from '@/services/vector.service';
-import { getEntityByName, traverse } from '@/services/graphService';
+import { getEntityByName, traverse, getNeighbors } from '@/services/graphService';
 import { executeSandboxedQuery } from '@/services/sqlSandbox.service';
+import { getFlag } from '@/services/featureFlags';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -121,7 +122,7 @@ const SYNONYM_MAP: Record<string, string[]> = {
   travel:    ['trip', 'vacation', 'destination', 'flight', 'hotel', 'country', 'city'],
   movie:     ['film', 'cinema', 'show', 'series', 'watch', 'tv'],
   hobby:     ['interest', 'pastime', 'activity', 'sport', 'game'],
-  family:    ['parent', 'child', 'sibling', 'spouse', 'relative', 'kid', 'mom', 'dad', 'wife', 'husband'],
+  family:    ['parent', 'child', 'sibling', 'spouse', 'relative', 'kid', 'mom', 'dad', 'wife', 'husband', 'daughter', 'son', 'brother', 'sister', 'uncle', 'aunt', 'cousin', 'grandparent', 'grandmother', 'grandfather'],
   friend:    ['buddy', 'pal', 'companion', 'social'],
   pet:       ['dog', 'cat', 'animal'],
   finance:   ['money', 'budget', 'investment', 'savings', 'expense', 'income', 'salary'],
@@ -132,7 +133,7 @@ const SYNONYM_MAP: Record<string, string[]> = {
 
 const TIMELINE_PATTERNS = /\b(when|last\s+time|history|recently|how\s+long\s+ago|date|ago|latest|previous|first\s+time|ever)\b/i;
 const PREFERENCE_PATTERNS = /\b(like|prefer|favorite|enjoy|love|hate|dislike|best|worst|opinion|feel\s+about)\b/i;
-const RELATIONSHIP_PATTERNS = /\b(who\s+(does|do|is|are|did)|knows?|friend|family|colleague|connected|relationship|related|together|introduced|met)\b/i;
+const RELATIONSHIP_PATTERNS = /\b(who\s+(does|do|is|are|did)|knows?|friend|family|colleague|connected|relationship|related|together|introduced|met|daughter|son|wife|husband|spouse|partner|mother|father|parent|child|children|sibling|brother|sister|uncle|aunt|cousin|grandparent|grandmother|grandfather)\b/i;
 const QUANTITATIVE_PATTERNS = /\b(how\s+many|how\s+much|count|total|average|frequency|number\s+of|sum|statistics|stats)\b/i;
 
 const STOP_WORDS = new Set([
@@ -146,6 +147,31 @@ const STOP_WORDS = new Set([
 const TIMELINE_EXCEPTION_PATTERNS = /\b(reading\s+history|book\s+history|books\s+history)\b/i;
 const MAX_PROFILE_FACT_DEPTH = 3;
 const MAX_PROFILE_FACTS = 30;
+
+const POSSESSIVE_ROLE_PATTERNS = /\bmy\s+(daughter|son|wife|husband|spouse|partner|mother|father|parent|child|children|sibling|brother|sister|uncle|aunt|cousin|grandparent|grandmother|grandfather)\b/i;
+
+const ROLE_TO_RELATION: Record<string, string[]> = {
+  daughter: ['family_member', 'parent_of'],
+  son: ['family_member', 'parent_of'],
+  wife: ['family_member', 'married_to'],
+  husband: ['family_member', 'married_to'],
+  spouse: ['family_member', 'married_to'],
+  partner: ['family_member', 'married_to'],
+  mother: ['family_member'],
+  father: ['family_member'],
+  parent: ['family_member'],
+  child: ['family_member', 'parent_of'],
+  children: ['family_member', 'parent_of'],
+  sibling: ['family_member'],
+  brother: ['family_member'],
+  sister: ['family_member'],
+  uncle: ['family_member'],
+  aunt: ['family_member'],
+  cousin: ['family_member'],
+  grandparent: ['family_member'],
+  grandmother: ['family_member'],
+  grandfather: ['family_member'],
+};
 
 function normalizeSearchText(input: string): string {
   return input
@@ -234,16 +260,33 @@ export function classifyIntent(topic: string): ClassifiedIntent {
     return { primary: 'general', expandedTerms: [], entityTypeHints: [], relationHints: [] };
   }
 
-  // Determine primary intent (first match wins — order matters)
+  // Declare all output variables at top
   let primary: IntentType = 'general';
-  if (TIMELINE_PATTERNS.test(lower) && !TIMELINE_EXCEPTION_PATTERNS.test(lower)) primary = 'timeline';
-  else if (PREFERENCE_PATTERNS.test(lower)) primary = 'preference';
-  else if (RELATIONSHIP_PATTERNS.test(lower)) primary = 'relationship';
-  else if (QUANTITATIVE_PATTERNS.test(lower)) primary = 'quantitative';
-  else if (lower.split(/\s+/).map(normalizeToken).filter(isMeaningfulToken).length >= 2) primary = 'factual';
+  const expandedTerms: string[] = [];
+  const entityTypeHints: string[] = [];
+  const relationHints: string[] = [];
+
+  // Possessive role detection ("my daughter", "my wife") — runs first
+  const possessiveMatch = lower.match(POSSESSIVE_ROLE_PATTERNS);
+  if (possessiveMatch) {
+    const role = possessiveMatch[1].toLowerCase();
+    primary = 'relationship'; // Override — family queries are always relationship intent
+    entityTypeHints.push('person');
+    const relations = ROLE_TO_RELATION[role] || ['family_member'];
+    relationHints.push(...relations);
+    expandedTerms.push(role);
+  }
+
+  // Determine primary intent (only if possessive didn't already set it)
+  if (!possessiveMatch) {
+    if (TIMELINE_PATTERNS.test(lower) && !TIMELINE_EXCEPTION_PATTERNS.test(lower)) primary = 'timeline';
+    else if (PREFERENCE_PATTERNS.test(lower)) primary = 'preference';
+    else if (RELATIONSHIP_PATTERNS.test(lower)) primary = 'relationship';
+    else if (QUANTITATIVE_PATTERNS.test(lower)) primary = 'quantitative';
+    else if (lower.split(/\s+/).map(normalizeToken).filter(isMeaningfulToken).length >= 2) primary = 'factual';
+  }
 
   // Expand terms using synonym map
-  const expandedTerms: string[] = [];
   const words = lower.split(/\s+/).map(normalizeToken).filter(isMeaningfulToken);
   for (const word of words) {
     for (const [key, synonyms] of Object.entries(SYNONYM_MAP)) {
@@ -262,7 +305,6 @@ export function classifyIntent(topic: string): ClassifiedIntent {
   }
 
   // Entity type hints
-  const entityTypeHints: string[] = [];
   if (RELATIONSHIP_PATTERNS.test(lower) || /\b(person|people|someone|anyone)\b/i.test(lower)) {
     entityTypeHints.push('person');
   }
@@ -274,7 +316,6 @@ export function classifyIntent(topic: string): ClassifiedIntent {
   }
 
   // Relation hints
-  const relationHints: string[] = [];
   if (/\b(work|colleague|employ|hire)\b/i.test(lower)) relationHints.push('works_at', 'works_with');
   if (/\b(friend|know|met)\b/i.test(lower)) relationHints.push('knows', 'friends_with');
   if (/\b(family|parent|child|sibling|married|spouse)\b/i.test(lower)) relationHints.push('family', 'related_to');
@@ -437,11 +478,19 @@ export function buildRetrievalPlan(
         });
         break;
       case 'graph':
-        recommendedCalls.push({
-          tool: 'recall',
-          args: { mode: 'graph', graph: { queryType: 'pattern', pattern: '<user_topic>' } },
-          reason: source.reason,
-        });
+        if (getFlag('FEATURE_RECALL_STRUCTURED_GRAPH_PREFERRED')) {
+          recommendedCalls.push({
+            tool: 'recall',
+            args: { mode: 'graph', graph: { queryType: 'pattern', pattern: { entityType: '<type>', relation: '<relation>', targetType: '<target_type>' } } },
+            reason: `${source.reason} (structured pattern preferred)`,
+          });
+        } else {
+          recommendedCalls.push({
+            tool: 'recall',
+            args: { mode: 'graph', graph: { queryType: 'pattern', pattern: '<user_topic>' } },
+            reason: source.reason,
+          });
+        }
         break;
     }
   }
@@ -459,7 +508,7 @@ function normalizeFact(text: string): string {
 /**
  * Fuse facts: normalize, dedup, corroboration boost, sort by confidence.
  */
-export function fuseFacts(facts: RetrievedFact[], maxFacts?: number): RetrievedFact[] {
+export function fuseFacts(facts: RetrievedFact[], maxFacts?: number, intent?: ClassifiedIntent): RetrievedFact[] {
   if (facts.length === 0) return [];
 
   const deduped: Array<RetrievedFact & { _norm: string; _sources: Set<SourceType> }> = [];
@@ -490,6 +539,19 @@ export function fuseFacts(facts: RetrievedFact[], maxFacts?: number): RetrievedF
       }
     } else {
       deduped.push({ ...fact, _norm: norm, _sources: new Set([fact.sourceType]) });
+    }
+  }
+
+  // Role-match boosting: boost facts matching relation hints
+  if (intent?.relationHints.length) {
+    for (const entry of deduped) {
+      const factLower = entry._norm;
+      const matchesHint = intent.relationHints.some(hint =>
+        factLower.includes(hint.replace(/_/g, ' ')) || factLower.includes(hint)
+      );
+      if (matchesHint && entry.confidence < 0.95) {
+        entry.confidence = Math.min(entry.confidence + 0.05, 0.95);
+      }
     }
   }
 
@@ -593,43 +655,117 @@ async function retrieveFromGraph(
 
   const facts: RetrievedFact[] = [];
 
-  // Convert found entities to facts
+  // Convert found entities to facts with ranking boosts
   for (const entity of entities) {
+    let confidence = entity.similarity ?? 0.5;
+    // Boost: relationship intent + person entity type
+    if (intent.primary === 'relationship' && entity.type === 'person') {
+      confidence = Math.min(confidence + 0.15, 0.95);
+    }
+    // Boost: high mention count indicates well-established entity
+    if (entity.mentionCount >= 3) {
+      confidence = Math.min(confidence + 0.05, 0.95);
+    }
+
     facts.push({
       fact: `${entity.name} (${entity.type})`,
       sourceType: 'graph',
       sourceRef: `graph/entity/${entity.id}`,
-      confidence: entity.similarity ?? 0.5,
+      confidence,
       timestamp: entity.lastSeen?.toISOString(),
     });
   }
 
-  // For top seeds with high similarity, traverse relationships
+  // For top seeds with high similarity, get neighbors with edge relation info
   const topSeeds = entities
     .filter(e => (e.similarity ?? 0) > 0.4)
     .slice(0, 5);
 
+  // Build relation filter from intent hints for traversal
+  const graphRelationFilter: string[] = [];
+  if (intent.relationHints.length > 0) {
+    const known = ['works_at', 'attended', 'founded', 'married_to', 'parent_of',
+                    'friend', 'knows', 'family_member', 'visited', 'lives_at',
+                    'interested_in', 'related_to'];
+    for (const hint of intent.relationHints) {
+      if (known.includes(hint)) {
+        graphRelationFilter.push(hint);
+      }
+    }
+  }
+
+  // Get 1-hop neighbors with full edge info for rich fact formatting
+  const neighborPromises = topSeeds.map(async (seed) => {
+    try {
+      const neighbors = await getNeighbors(userId, seed.id, {
+        direction: 'both',
+        relationFilter: graphRelationFilter.length === 1 ? graphRelationFilter[0] : undefined,
+        limit: 20,
+      });
+
+      return neighbors.map(neighbor => {
+        const edge = neighbor.edge;
+        const relation = String(edge.relation).replace(/_/g, ' ');
+        const isOutbound = edge.sourceId === seed.id;
+        const fact = isOutbound
+          ? `${seed.name} ${relation} ${neighbor.name}`
+          : `${neighbor.name} ${relation} ${seed.name}`;
+
+        let conf = (seed.similarity ?? 0.5) * 0.85;
+        // Boost: edge weight indicates reinforcement
+        if (edge.weight > 1.5) {
+          conf = Math.min(conf + 0.05, 0.95);
+        }
+        // Boost: relation matches intent hints
+        if (intent.relationHints.length > 0 &&
+            intent.relationHints.some(hint => edge.relation.includes(hint) || hint.includes(edge.relation))) {
+          conf = Math.min(conf + 0.1, 0.95);
+        }
+
+        return {
+          fact,
+          sourceType: 'graph' as SourceType,
+          sourceRef: `graph/edge/${edge.id}`,
+          confidence: conf,
+        };
+      });
+    } catch {
+      return [];
+    }
+  });
+
+  // Also run deep traversal for multi-hop paths (depth > 1)
   const traversalPromises = topSeeds.map(async (seed) => {
     try {
       const paths = await traverse(userId, seed.id, {
         maxDepth: config.maxGraphHops,
         limit: 20,
+        ...(graphRelationFilter.length > 0 ? { relationFilter: graphRelationFilter } : {}),
       });
-      // Filter out the start node itself
+      // Filter out the start node and depth-1 nodes (already covered by getNeighbors)
       return paths
-        .filter(node => node.id !== seed.id)
+        .filter(node => node.id !== seed.id && node.depth > 1)
         .map(node => ({
-          fact: `${seed.name} → ${node.type} → ${node.name}`,
+          fact: `${seed.name} is connected to ${node.name} (${node.type})`,
           sourceType: 'graph' as SourceType,
           sourceRef: `graph/traverse/${seed.id}→${node.id}`,
-          confidence: (seed.similarity ?? 0.5) * 0.8,
+          confidence: (seed.similarity ?? 0.5) * 0.7,
         }));
     } catch {
       return [];
     }
   });
 
-  const traversalResults = await Promise.allSettled(traversalPromises);
+  const [neighborResults, traversalResults] = await Promise.all([
+    Promise.allSettled(neighborPromises),
+    Promise.allSettled(traversalPromises),
+  ]);
+
+  for (const result of neighborResults) {
+    if (result.status === 'fulfilled') {
+      facts.push(...result.value);
+    }
+  }
   for (const result of traversalResults) {
     if (result.status === 'fulfilled') {
       facts.push(...result.value);
@@ -736,7 +872,8 @@ function retrieveFromProfile(
       if (facts.length >= MAX_PROFILE_FACTS) break;
       const entryMatches =
         rootMatches ||
-        textMatchesTerms(entry.path, uniqueTerms);
+        textMatchesTerms(entry.path, uniqueTerms) ||
+        textMatchesTerms(entry.value, uniqueTerms);
       if (!entryMatches) continue;
 
       facts.push({
@@ -751,6 +888,62 @@ function retrieveFromProfile(
   }
 
   return facts;
+}
+
+/**
+ * Expand query terms using profile family context.
+ * When intent is relationship and profile has family data, add family member
+ * names and nicknames that match the query role terms.
+ */
+export function expandQueryWithProfileContext(
+  topic: string,
+  intent: ClassifiedIntent,
+  profile: Record<string, unknown> | null,
+): string[] {
+  if (!profile || intent.primary !== 'relationship') return [];
+
+  const additionalTerms: string[] = [];
+
+  // Scan profile family structure
+  const family = profile.family;
+  if (!family) return [];
+
+  const members: Array<Record<string, unknown>> = [];
+
+  if (Array.isArray(family)) {
+    for (const m of family) {
+      if (m && typeof m === 'object') members.push(m as Record<string, unknown>);
+    }
+  } else if (typeof family === 'object' && family !== null) {
+    for (const [key, val] of Object.entries(family as Record<string, unknown>)) {
+      if (Array.isArray(val)) {
+        for (const m of val) {
+          if (m && typeof m === 'object') members.push(m as Record<string, unknown>);
+        }
+      } else if (val && typeof val === 'object') {
+        members.push({ ...(val as Record<string, unknown>), relation: key });
+      }
+    }
+  }
+
+  for (const member of members) {
+    const relation = String(member.relation || '').toLowerCase();
+    const name = String(member.name || '').toLowerCase();
+    const nickname = String(member.nickname || '').toLowerCase();
+
+    // Check if any query term or expanded term matches this member's relation
+    const allTerms = [...intent.expandedTerms, ...topic.toLowerCase().split(/\s+/)];
+    const matchesRole = allTerms.some(
+      (term) => relation.includes(term) || term.includes(relation),
+    );
+
+    if (matchesRole && name) {
+      additionalTerms.push(name);
+      if (nickname) additionalTerms.push(nickname);
+    }
+  }
+
+  return [...new Set(additionalTerms)];
 }
 
 // ── Async Orchestrator ─────────────────────────────────────────────────
@@ -776,6 +969,14 @@ export async function retrieveKnowledge(
   let allFacts: RetrievedFact[] = [];
 
   const intent = classifyIntent(topic);
+
+  // Expand query with profile family context
+  const profileExpansion = expandQueryWithProfileContext(topic, intent, profile);
+  if (profileExpansion.length > 0) {
+    intent.expandedTerms.push(...profileExpansion);
+    intent.expandedTerms = [...new Set(intent.expandedTerms)];
+  }
+
   const scoredSources = scoreSourceRelevance(topic, intent, tablesMeta, collectionsMeta, profile);
   const config = BUDGET_CONFIG[budget];
 
@@ -788,6 +989,11 @@ export async function retrieveKnowledge(
   const selectedCollections = scoredSources
     .filter(s => s.sourceType === 'vector' && s.relevanceScore >= 0.3)
     .map(s => s.sourceId);
+
+  // Include edge summary vectors when feature flag is enabled
+  if (getFlag('FEATURE_RETRIEVAL_EDGE_VECTORS') && !selectedCollections.includes('graph_edges')) {
+    selectedCollections.push('graph_edges');
+  }
 
   const useGraph = scoredSources.some(s => s.sourceType === 'graph' && s.relevanceScore >= 0.3);
   const useProfile = scoredSources.some(s => s.sourceType === 'profile' && s.relevanceScore >= 0.3);
@@ -850,7 +1056,7 @@ export async function retrieveKnowledge(
   }
 
   // Fuse, dedup, and truncate
-  const fused = fuseFacts(allFacts, config.maxTotalFacts);
+  const fused = fuseFacts(allFacts, config.maxTotalFacts, intent);
 
   const plannedSources: SourceType[] = ['vector'];
   if (selectedTables.length > 0) plannedSources.push('table');

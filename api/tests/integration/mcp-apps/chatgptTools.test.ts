@@ -13,6 +13,7 @@ import { createChatGptMcpRoutes } from '@/mcp-apps/handler';
 import { createTestUser, cleanupTestUser, type TestUser } from '../../helpers/db';
 import { grantConsent, revokeAllAgentConsent } from '@/services/consent.service';
 import type { HonoEnv } from '@/types/hono';
+import { TOOL_DESCRIPTIONS } from '@/mcp/toolsContract';
 
 /**
  * Build a minimal Hono app with auth + chatgpt-mcp for testing.
@@ -270,5 +271,120 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
       'recall',
       'review',
     ]);
+  });
+
+  it('tool descriptions match centralized TOOL_DESCRIPTIONS contract', async () => {
+    const response = await jsonRpc(
+      app,
+      'tools/list',
+      {},
+      authHeaders(testUser.userId),
+    );
+
+    const body = await parseResponse(response);
+    for (const tool of body.result.tools) {
+      const expected = TOOL_DESCRIPTIONS[tool.name as keyof typeof TOOL_DESCRIPTIONS];
+      expect(tool.description).toBe(expected);
+    }
+  });
+
+  it('recall description includes sequencing and relationship hints', async () => {
+    const response = await jsonRpc(
+      app,
+      'tools/list',
+      {},
+      authHeaders(testUser.userId),
+    );
+
+    const body = await parseResponse(response);
+    const recall = body.result.tools.find((t: any) => t.name === 'recall');
+    expect(recall.description).toContain('start of every conversation');
+    expect(recall.description).toContain('family roles');
+    expect(recall.description).toContain('nicknames');
+  });
+
+  // ---------------------------------------------------
+  // Verification matrix: relationship queries via ChatGPT MCP
+  // ---------------------------------------------------
+  describe('Verification matrix — relationship queries (ChatGPT parity)', () => {
+    beforeEach(async () => {
+      // Memorize family data
+      const memorize = await jsonRpc(
+        app,
+        'tools/call',
+        {
+          name: 'memorize',
+          arguments: {
+            text: 'My daughter Georgia was born on June 15th 2020. Her nickname is Gigi.',
+            category: 'profile',
+            data: {
+              family: [
+                {
+                  name: 'Georgia',
+                  relation: 'daughter',
+                  birthday: '2020-06-15',
+                  nickname: 'Gigi',
+                },
+              ],
+            },
+          },
+        },
+        authHeaders(testUser.userId),
+      );
+      expect(memorize.status).toBe(200);
+    });
+
+    function parseToolResultPayload(body: any): Record<string, any> {
+      expect(body.error).toBeUndefined();
+      expect(body.result).toBeDefined();
+      expect(body.result.isError).not.toBe(true);
+      const text = body.result.content?.[0]?.text;
+      expect(typeof text).toBe('string');
+      // ChatGPT adapter also has structuredContent
+      expect(body.result.structuredContent).toBeDefined();
+      return body.result.structuredContent;
+    }
+
+    const verificationPrompts = [
+      'what do you know about my daughter',
+      "when is my daughter's birthday",
+      'what do you know about Georgia',
+    ];
+
+    for (const prompt of verificationPrompts) {
+      it(`recall("${prompt}") returns family facts with evidence hints`, async () => {
+        const response = await jsonRpc(
+          app,
+          'tools/call',
+          { name: 'recall', arguments: { topic: prompt, budget: 'medium' } },
+          authHeaders(testUser.userId),
+        );
+        expect(response.status).toBe(200);
+        const payload = parseToolResultPayload(await parseResponse(response));
+        expect(Array.isArray(payload.facts)).toBe(true);
+
+        // Must mention Georgia or daughter
+        const mentionsFamily = payload.facts.some(
+          (f: { fact?: string }) => {
+            const text = String(f.fact || '').toLowerCase();
+            return text.includes('georgia') || text.includes('daughter');
+          },
+        );
+        expect(mentionsFamily).toBe(true);
+
+        // No [object Object] artifacts
+        expect(
+          payload.facts.every(
+            (f: { fact?: string }) => !String(f.fact || '').includes('[object Object]'),
+          ),
+        ).toBe(true);
+
+        // ChatGPT adapter should include evidence hints
+        if (payload._hints) {
+          expect(Array.isArray(payload._hints.topFacts)).toBe(true);
+          expect(Array.isArray(payload._hints.evidenceSources)).toBe(true);
+        }
+      });
+    }
   });
 });

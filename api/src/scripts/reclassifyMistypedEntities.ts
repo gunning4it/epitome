@@ -20,6 +20,36 @@
 
 import { sql, withUserSchema } from '@/db/client';
 
+/**
+ * Low-signal names that should be soft-deleted rather than reclassified.
+ * Mirrors LOW_SIGNAL_NAMES from entityExtraction.ts.
+ */
+const LOW_SIGNAL_NAMES = new Set([
+  'add_record', 'save_memory', 'mcp_add_record', 'mcp_save_memory',
+  'unknown', 'none', 'null', 'undefined', 'value', 'test',
+  'true', 'false', 'yes', 'no', 'n/a',
+  'user', 'profile', 'data', 'record', 'entry', 'item', 'thing',
+  'update', 'note', 'notes', 'info', 'general', 'other', 'misc',
+  'default', 'new', 'old', 'current', 'previous', 'latest',
+]);
+
+/**
+ * Check if an entity name should be dropped (soft-deleted) instead of reclassified.
+ * Matches the logic from shouldDropExtractedEntity() in entityExtraction.ts.
+ */
+function shouldDropEntity(name: string): boolean {
+  const lower = name.toLowerCase().trim();
+  if (!lower || lower.length < 2 || lower.length > 120) return true;
+  if (LOW_SIGNAL_NAMES.has(lower)) return true;
+  // snake_case system identifiers
+  if (/^[a-z]+(?:_[a-z0-9]+)+$/.test(lower) && !lower.includes(' ')) return true;
+  // System/metadata prefix
+  if (/^(profile|table|collection|vector|memory|audit|system)\b/i.test(lower)) return true;
+  // Pure numeric
+  if (/^\d+$/.test(lower)) return true;
+  return false;
+}
+
 interface UserRow {
   id: string;
   schema_name: string;
@@ -61,6 +91,7 @@ async function main(): Promise<void> {
   let totalReclassifiedFound = 0;
   let totalReversedFixed = 0;
   let totalReversedFound = 0;
+  let totalSoftDeleted = 0;
 
   for (const user of users) {
     try {
@@ -157,6 +188,23 @@ async function main(): Promise<void> {
       totalReclassifiedFound += mistyped.length;
 
       for (const entity of mistyped) {
+        // Safety check: if the entity name is low-signal junk, soft-delete instead of reclassifying
+        if (shouldDropEntity(entity.name)) {
+          if (dryRun) {
+            console.log(`  [DRY] ${user.schema_name}: SOFT-DELETE "${entity.name}" (low-signal name, would be dropped by extraction filter)`);
+          } else {
+            await withUserSchema(user.id, async (tx) => {
+              await tx.unsafe(
+                `UPDATE entities SET _deleted_at = NOW() WHERE id = $1`,
+                [entity.id]
+              );
+            });
+            console.log(`  SOFT-DELETED ${user.schema_name}: "${entity.name}" (low-signal name)`);
+            totalSoftDeleted++;
+          }
+          continue;
+        }
+
         if (dryRun) {
           console.log(`  [DRY] ${user.schema_name}: "${entity.name}" (${entity.type} → organization, via ${entity.relation})`);
         } else {
@@ -179,6 +227,7 @@ async function main(): Promise<void> {
   console.log(`Reversed edges found: ${totalReversedFound}`);
   console.log(`Reversed edges fixed: ${dryRun ? '0 (dry run)' : totalReversedFixed}`);
   console.log(`Mistyped entities found: ${totalReclassifiedFound}`);
+  console.log(`Entities soft-deleted (low-signal): ${dryRun ? '0 (dry run)' : totalSoftDeleted}`);
   console.log(`Entities reclassified: ${dryRun ? '0 (dry run)' : totalReclassified}`);
   console.log(`Finished at ${new Date().toISOString()}`);
 

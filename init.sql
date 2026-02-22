@@ -666,6 +666,8 @@ BEGIN
     WHERE _deleted_at IS NULL;
   CREATE INDEX idx_entities_name_text ON entities
     USING gin (to_tsvector('english', name));
+  CREATE INDEX idx_entities_properties_gin ON entities
+    USING gin (properties jsonb_path_ops);
 
   -- Knowledge graph: edges
   CREATE TABLE edges (

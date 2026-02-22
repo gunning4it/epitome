@@ -352,6 +352,90 @@ function hasReaffirmedPatchValue(
 }
 
 /**
+ * Identity violation detail
+ */
+export interface IdentityViolation {
+  field: string;
+  attemptedValue: unknown;
+  reason: string;
+  blocked: boolean;
+}
+
+/**
+ * Check identity invariants before profile mutation.
+ *
+ * Rule: profile.name cannot be set to a known family member name/nickname
+ * unless an explicit overrideReason is provided.
+ *
+ * @param currentData - Current profile data
+ * @param patch - Proposed changes
+ * @param changedBy - Who is making the change ('user', agent ID, etc.)
+ * @param overrideReason - Optional reason to override the check
+ * @returns Array of violations (empty if none)
+ */
+export function checkIdentityInvariants(
+  currentData: ProfileData,
+  patch: Partial<ProfileData>,
+  changedBy: string,
+  overrideReason?: string,
+): IdentityViolation[] {
+  const violations: IdentityViolation[] = [];
+
+  // Only check name changes
+  if (!patch.name || typeof patch.name !== 'string') return violations;
+
+  // Build set of known family member names and nicknames
+  const familyNames = new Set<string>();
+  const family = currentData.family;
+
+  if (family) {
+    const members: Array<Record<string, unknown>> = [];
+
+    if (Array.isArray(family)) {
+      for (const m of family) {
+        if (m && typeof m === 'object') members.push(m as Record<string, unknown>);
+      }
+    } else if (typeof family === 'object') {
+      for (const [, val] of Object.entries(family as Record<string, unknown>)) {
+        if (Array.isArray(val)) {
+          for (const m of val) {
+            if (m && typeof m === 'object') members.push(m as Record<string, unknown>);
+          }
+        } else if (val && typeof val === 'object') {
+          members.push(val as Record<string, unknown>);
+        }
+      }
+    }
+
+    for (const member of members) {
+      if (member.name && typeof member.name === 'string') {
+        familyNames.add(member.name.toLowerCase());
+        // Also add first name only
+        const firstName = member.name.split(' ')[0];
+        if (firstName) familyNames.add(firstName.toLowerCase());
+      }
+      if (member.nickname && typeof member.nickname === 'string') {
+        familyNames.add(member.nickname.toLowerCase());
+      }
+    }
+  }
+
+  // Check if proposed name matches a family member
+  const proposedNameLower = patch.name.toLowerCase().trim();
+  if (familyNames.has(proposedNameLower)) {
+    const blocked = changedBy !== 'user' && !overrideReason;
+    violations.push({
+      field: 'name',
+      attemptedValue: patch.name,
+      reason: `Cannot set profile name to "${patch.name}" — matches a known family member. This would corrupt the owner identity.`,
+      blocked,
+    });
+  }
+
+  return violations;
+}
+
+/**
  * Update profile (PATCH with deep merge)
  *
  * Applies RFC 7396 JSON Merge Patch to current profile
@@ -376,6 +460,19 @@ export async function updateProfile(
     );
     const currentData = (currentRows[0]?.data as ProfileData) || {};
     const previousMetaId = (currentRows[0]?._meta_id as number | undefined) || undefined;
+
+    // Identity invariant check
+    const violations = checkIdentityInvariants(
+      currentData as ProfileData,
+      patch as Partial<ProfileData>,
+      changedBy,
+    );
+    const blockedViolations = violations.filter((v) => v.blocked);
+    if (blockedViolations.length > 0) {
+      throw new Error(
+        `IDENTITY_VIOLATION: ${blockedViolations.map((v) => v.reason).join('; ')}`,
+      );
+    }
 
     // Apply deep merge
     const newData = deepMerge(

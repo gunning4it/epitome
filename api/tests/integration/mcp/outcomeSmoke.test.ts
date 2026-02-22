@@ -267,4 +267,159 @@ describe('Outcome smoke: life-memory UX expectations', () => {
       expect(Array.isArray(knowledgePayload.coverageDetails.missingSources)).toBe(true);
     }
   });
+
+  // ---------------------------------------------------
+  // Phase 0 — red baseline: daughter relationship retrieval
+  // ---------------------------------------------------
+  it('recalls family member facts when asked about "my daughter"', async () => {
+    // Step 1: Memorize family data with daughter
+    const memorize = await jsonRpc(
+      app,
+      'tools/call',
+      {
+        name: 'memorize',
+        arguments: {
+          text: 'My daughter Georgia was born on June 15th 2020. Her nickname is Gigi.',
+          category: 'profile',
+          data: {
+            family: [
+              {
+                name: 'Georgia',
+                relation: 'daughter',
+                birthday: '2020-06-15',
+                nickname: 'Gigi',
+              },
+            ],
+          },
+        },
+      },
+      claudeHeaders,
+    );
+    expect(memorize.status).toBe(200);
+    parseToolResultPayload(await parseBody(memorize));
+
+    // Step 2: Recall "what do you know about my daughter"
+    const recallResponse = await jsonRpc(
+      app,
+      'tools/call',
+      {
+        name: 'recall',
+        arguments: {
+          topic: 'what do you know about my daughter',
+          budget: 'medium',
+        },
+      },
+      claudeHeaders,
+    );
+    expect(recallResponse.status).toBe(200);
+    const recallPayload = parseToolResultPayload(await parseBody(recallResponse));
+
+    expect(Array.isArray(recallPayload.facts)).toBe(true);
+    // Facts should mention Georgia or daughter
+    const mentionsDaughter = recallPayload.facts.some(
+      (f: { fact?: string }) =>
+        String(f.fact || '').toLowerCase().includes('georgia') ||
+        String(f.fact || '').toLowerCase().includes('daughter'),
+    );
+    expect(mentionsDaughter).toBe(true);
+    // No [object Object] artifacts
+    expect(
+      recallPayload.facts.every(
+        (f: { fact?: string }) => !String(f.fact || '').includes('[object Object]'),
+      ),
+    ).toBe(true);
+  });
+
+  // ---------------------------------------------------
+  // Phase 7 — verification matrix: relationship queries
+  // ---------------------------------------------------
+  describe('Phase 7 — verification matrix', () => {
+    beforeEach(async () => {
+      // Memorize family data for verification matrix
+      const memorize = await jsonRpc(
+        app,
+        'tools/call',
+        {
+          name: 'memorize',
+          arguments: {
+            text: 'My daughter Georgia was born on June 15th 2020. Her nickname is Gigi.',
+            category: 'profile',
+            data: {
+              family: [
+                {
+                  name: 'Georgia',
+                  relation: 'daughter',
+                  birthday: '2020-06-15',
+                  nickname: 'Gigi',
+                },
+              ],
+            },
+          },
+        },
+        claudeHeaders,
+      );
+      expect(memorize.status).toBe(200);
+    });
+
+    const verificationPrompts = [
+      'when is my daughter\'s birthday',
+      'what do you know about Georgia',
+    ];
+
+    for (const prompt of verificationPrompts) {
+      it(`recall("${prompt}") returns family facts via Claude MCP`, async () => {
+        const response = await jsonRpc(
+          app,
+          'tools/call',
+          { name: 'recall', arguments: { topic: prompt, budget: 'medium' } },
+          claudeHeaders,
+        );
+        expect(response.status).toBe(200);
+        const payload = parseToolResultPayload(await parseBody(response));
+        expect(Array.isArray(payload.facts)).toBe(true);
+
+        // Must mention Georgia or daughter
+        const mentionsFamily = payload.facts.some(
+          (f: { fact?: string }) => {
+            const text = String(f.fact || '').toLowerCase();
+            return text.includes('georgia') || text.includes('daughter');
+          },
+        );
+        expect(mentionsFamily).toBe(true);
+
+        // No [object Object] artifacts
+        expect(
+          payload.facts.every(
+            (f: { fact?: string }) => !String(f.fact || '').includes('[object Object]'),
+          ),
+        ).toBe(true);
+      });
+
+      it(`recall("${prompt}") returns family facts via ChatGPT MCP`, async () => {
+        const response = await jsonRpc(
+          app,
+          'tools/call',
+          { name: 'recall', arguments: { topic: prompt, budget: 'medium' } },
+          chatgptHeaders,
+        );
+        expect(response.status).toBe(200);
+        const payload = parseToolResultPayload(await parseBody(response));
+        expect(Array.isArray(payload.facts)).toBe(true);
+
+        const mentionsFamily = payload.facts.some(
+          (f: { fact?: string }) => {
+            const text = String(f.fact || '').toLowerCase();
+            return text.includes('georgia') || text.includes('daughter');
+          },
+        );
+        expect(mentionsFamily).toBe(true);
+
+        expect(
+          payload.facts.every(
+            (f: { fact?: string }) => !String(f.fact || '').includes('[object Object]'),
+          ),
+        ).toBe(true);
+      });
+    }
+  });
 });

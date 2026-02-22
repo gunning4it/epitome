@@ -5,7 +5,7 @@ import { logAuditEntry } from '@/services/audit.service';
 import { createWriteId, ingestProfileUpdate, ingestMemoryText } from '@/services/writeIngestion.service';
 import { withUserSchema } from '@/db/client';
 import { logger } from '@/utils/logger';
-import type { ProfileData } from '@/services/profile.service';
+import { getLatestProfile, checkIdentityInvariants, type ProfileData } from '@/services/profile.service';
 import type { ToolContext, ToolResult } from './types.js';
 import { toolSuccess, toolFailure, ToolErrorCode } from './types.js';
 
@@ -28,6 +28,42 @@ export async function updateProfile(
     if (msg.startsWith('CONSENT_DENIED')) {
       return toolFailure(ToolErrorCode.CONSENT_DENIED, msg, false);
     }
+    return toolFailure(ToolErrorCode.INTERNAL_ERROR, msg, true);
+  }
+
+  // Identity invariant check (pre-check before ingestion)
+  try {
+    let currentProfileData: Record<string, unknown> = {};
+    try {
+      const currentProfile = await getLatestProfile(userId);
+      currentProfileData = (currentProfile?.data || {}) as Record<string, unknown>;
+    } catch {
+      // Profile may not exist yet — skip identity check
+    }
+
+    const violations = checkIdentityInvariants(
+      currentProfileData as ProfileData,
+      args.data,
+      agentId,
+      args.reason,
+    );
+    const blockedViolations = violations.filter((v) => v.blocked);
+    if (blockedViolations.length > 0) {
+      await logAuditEntry(userId, {
+        agentId,
+        action: 'identity_violation_blocked',
+        resource: 'profile',
+        details: { violations: blockedViolations },
+      });
+      return toolFailure(
+        ToolErrorCode.INVALID_ARGS,
+        `IDENTITY_VIOLATION: ${blockedViolations.map((v) => v.reason).join('; ')}`,
+        false,
+      );
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error('Identity check failed', { error: msg, userId });
     return toolFailure(ToolErrorCode.INTERNAL_ERROR, msg, true);
   }
 
@@ -81,8 +117,19 @@ export async function updateProfile(
       logger.warn('Profile auto-vectorize failed', { error: String(err) })
     );
 
-    // Update the "user" node name if profile has a name
+    // Update the "user" node name if profile has a name (and identity check passed)
     if (updatedProfile.data.name) {
+      // Log the owner entity rename for audit trail
+      void logAuditEntry(userId, {
+        agentId,
+        action: 'owner_entity_rename',
+        resource: 'profile',
+        details: {
+          newName: updatedProfile.data.name,
+          changedBy: agentId,
+        },
+      }).catch(() => {});
+
       withUserSchema(userId, async (tx) => {
         await tx.unsafe(`
           UPDATE entities

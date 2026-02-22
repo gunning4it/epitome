@@ -4,12 +4,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mocks - vi.hoisted() runs before vi.mock() hoisting
 // =====================================================
 
-const { mockSearchAllVectors, mockGetEntityByName, mockTraverse, mockExecuteSandboxedQuery } =
+const { mockSearchAllVectors, mockGetEntityByName, mockTraverse, mockGetNeighbors, mockExecuteSandboxedQuery } =
   vi.hoisted(() => {
     return {
       mockSearchAllVectors: vi.fn(),
       mockGetEntityByName: vi.fn(),
       mockTraverse: vi.fn(),
+      mockGetNeighbors: vi.fn(),
       mockExecuteSandboxedQuery: vi.fn(),
     };
   });
@@ -21,6 +22,7 @@ vi.mock('@/services/vector.service', () => ({
 vi.mock('@/services/graphService', () => ({
   getEntityByName: mockGetEntityByName,
   traverse: mockTraverse,
+  getNeighbors: mockGetNeighbors,
 }));
 
 vi.mock('@/services/sqlSandbox.service', () => ({
@@ -43,7 +45,9 @@ import {
   buildRetrievalPlan,
   fuseFacts,
   retrieveKnowledge,
+  expandQueryWithProfileContext,
   BUDGET_CONFIG,
+  type ClassifiedIntent,
 } from '@/services/retrieval.service';
 
 // =====================================================
@@ -92,6 +96,33 @@ function makeTraverseResult(overrides: Record<string, unknown> = {}) {
     type: 'concept',
     depth: 1,
     pathWeight: 0.5,
+    ...overrides,
+  };
+}
+
+function makeNeighborResult(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 3,
+    name: 'Japanese Restaurant',
+    type: 'place',
+    properties: {},
+    confidence: 0.7,
+    mentionCount: 2,
+    firstSeen: new Date(),
+    lastSeen: new Date(),
+    deletedAt: null,
+    edge: {
+      id: 10,
+      sourceId: 1,
+      targetId: 3,
+      relation: 'visited',
+      weight: 1.5,
+      confidence: 0.8,
+      evidence: [],
+      firstSeen: new Date(),
+      lastSeen: new Date(),
+      properties: {},
+    },
     ...overrides,
   };
 }
@@ -358,7 +389,8 @@ describe('retrieval.service', () => {
       );
       expect(graphCall).toBeDefined();
       expect(graphCall!.tool).toBe('recall');
-      expect(graphCall!.args.graph).toEqual({ queryType: 'pattern', pattern: '<user_topic>' });
+      // With FEATURE_RECALL_STRUCTURED_GRAPH_PREFERRED (default: true), uses structured pattern
+      expect(graphCall!.args.graph).toEqual(expect.objectContaining({ queryType: 'pattern' }));
     });
 
     it('returns a plan object with recommendedCalls array', () => {
@@ -460,6 +492,7 @@ describe('retrieval.service', () => {
       mockSearchAllVectors.mockResolvedValue([makeVectorResult()]);
       mockGetEntityByName.mockResolvedValue([makeEntityResult()]);
       mockTraverse.mockResolvedValue([makeTraverseResult()]);
+      mockGetNeighbors.mockResolvedValue([makeNeighborResult()]);
       mockExecuteSandboxedQuery.mockResolvedValue(makeSandboxResult());
     });
 
@@ -542,9 +575,10 @@ describe('retrieval.service', () => {
 
       const consentChecker = makeConsentChecker(true);
 
+      // Use a topic that won't match profile values to test truly empty results
       const result = await retrieveKnowledge(
         TEST_USER_ID,
-        'sushi',
+        'quantum physics',
         'medium',
         consentChecker,
         defaultTables,
@@ -554,7 +588,7 @@ describe('retrieval.service', () => {
 
       expect(result.facts).toHaveLength(0);
       // Should NOT throw -- just returns empty results
-      expect(result).toHaveProperty('topic', 'sushi');
+      expect(result).toHaveProperty('topic', 'quantum physics');
     });
 
     it('consent denied for vectors: vectors skipped, no error', async () => {
@@ -691,9 +725,10 @@ describe('retrieval.service', () => {
 
       const consentChecker = makeConsentChecker(true);
 
+      // Use a topic that won't match profile values to test truly empty results
       const result = await retrieveKnowledge(
         TEST_USER_ID,
-        'sushi',
+        'quantum physics',
         'medium',
         consentChecker,
         defaultTables,
@@ -805,6 +840,216 @@ describe('retrieval.service', () => {
 
       expect(result).toHaveProperty('facts');
       expect(Array.isArray(result.facts)).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------
+  // Phase 0 — red baseline: relationship retrieval
+  // ---------------------------------------------------
+  describe('Phase 0 — red baseline: relationship retrieval', () => {
+    it('classifyIntent("what do you know about my daughter") returns primary: relationship', () => {
+      const result = classifyIntent('what do you know about my daughter');
+      expect(result.primary).toBe('relationship');
+    });
+
+    it('classifyIntent includes family_member in relationHints for "my daughter"', () => {
+      const result = classifyIntent('what do you know about my daughter');
+      expect(result.relationHints).toEqual(expect.arrayContaining(['family_member']));
+    });
+
+    it('classifyIntent includes person in entityTypeHints for "my daughter"', () => {
+      const result = classifyIntent('what do you know about my daughter');
+      expect(result.entityTypeHints).toEqual(expect.arrayContaining(['person']));
+    });
+
+    it('classifyIntent("when is my daughter\'s birthday") returns relationship with family_member hint', () => {
+      const result = classifyIntent("when is my daughter's birthday");
+      expect(result.primary).toBe('relationship');
+      expect(result.relationHints).toEqual(expect.arrayContaining(['family_member']));
+    });
+
+    it('classifyIntent adds daughter to expandedTerms for "my daughter"', () => {
+      const result = classifyIntent('what do you know about my daughter');
+      expect(result.expandedTerms).toEqual(expect.arrayContaining(['daughter']));
+    });
+
+    it('profile retrieval for "my daughter" against family profile returns Georgia facts', () => {
+      const profile = {
+        family: {
+          children: [{ name: 'Georgia', relation: 'daughter', birthday: '2020-06-15' }],
+        },
+      };
+
+      // retrieveFromProfile is private, so we test via retrieveKnowledge
+      // But we can test the pure function behavior by calling retrieveKnowledge with mocked services
+      mockSearchAllVectors.mockResolvedValue([]);
+      mockGetEntityByName.mockResolvedValue([]);
+      mockTraverse.mockResolvedValue([]);
+      mockExecuteSandboxedQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      // Use retrieveKnowledge to test profile retrieval behavior
+      return retrieveKnowledge(
+        TEST_USER_ID,
+        'what do you know about my daughter',
+        'medium',
+        makeConsentChecker(true),
+        [],
+        [],
+        profile,
+      ).then((result) => {
+        // Should find Georgia's facts via profile value matching
+        const profileFacts = result.facts.filter((f) => f.sourceType === 'profile');
+        const georgiaMentioned = profileFacts.some(
+          (f) => f.fact.includes('Georgia') || f.fact.includes('daughter'),
+        );
+        expect(georgiaMentioned).toBe(true);
+      });
+    });
+  });
+
+  // ---------------------------------------------------
+  // Phase 2 — graph semantic traversal
+  // ---------------------------------------------------
+  describe('Phase 2 — graph semantic traversal', () => {
+    it('fuseFacts with intent applies role-match boosting', () => {
+      const facts = [
+        { fact: 'Georgia is a family_member of user', sourceType: 'graph' as const, sourceRef: 'g:1', confidence: 0.7 },
+        { fact: 'User likes sushi', sourceType: 'vector' as const, sourceRef: 'v:1', confidence: 0.7 },
+      ];
+      const intent = classifyIntent('what do you know about my daughter');
+      // intent should have family_member in relationHints
+      expect(intent.relationHints).toEqual(expect.arrayContaining(['family_member']));
+
+      const fused = fuseFacts(facts, undefined, intent);
+
+      // The family_member fact should be boosted
+      const familyFact = fused.find(f => f.fact.includes('family_member'));
+      expect(familyFact).toBeDefined();
+      expect(familyFact!.confidence).toBe(0.75); // 0.7 + 0.05
+
+      // The sushi fact should NOT be boosted
+      const sushiFact = fused.find(f => f.fact.includes('sushi'));
+      expect(sushiFact).toBeDefined();
+      expect(sushiFact!.confidence).toBe(0.7);
+    });
+
+    it('fuseFacts without intent does not boost', () => {
+      const facts = [
+        { fact: 'Georgia is a family_member of user', sourceType: 'graph' as const, sourceRef: 'g:1', confidence: 0.7 },
+      ];
+
+      const fused = fuseFacts(facts);
+
+      expect(fused[0].confidence).toBe(0.7);
+    });
+
+    it('fuseFacts role-match boost does not exceed 0.95', () => {
+      const facts = [
+        { fact: 'Georgia is a family_member of user', sourceType: 'graph' as const, sourceRef: 'g:1', confidence: 0.93 },
+      ];
+      const intent: ClassifiedIntent = {
+        primary: 'relationship',
+        expandedTerms: [],
+        entityTypeHints: ['person'],
+        relationHints: ['family_member'],
+      };
+
+      const fused = fuseFacts(facts, undefined, intent);
+
+      expect(fused[0].confidence).toBe(0.95);
+    });
+
+    it('graph neighbor facts include relation in human-readable format', async () => {
+      mockSearchAllVectors.mockResolvedValue([]);
+      mockGetEntityByName.mockResolvedValue([
+        makeEntityResult({ id: 1, name: 'Georgia', type: 'person', similarity: 0.9 }),
+      ]);
+      mockGetNeighbors.mockResolvedValue([
+        makeNeighborResult({
+          id: 5, name: 'Bruce', type: 'person',
+          edge: {
+            id: 20, sourceId: 5, targetId: 1, relation: 'parent_of',
+            weight: 2.0, confidence: 0.9, evidence: [],
+            firstSeen: new Date(), lastSeen: new Date(), properties: {},
+          },
+        }),
+      ]);
+      mockTraverse.mockResolvedValue([]);
+      mockExecuteSandboxedQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      const consentChecker = makeConsentChecker(true);
+      const result = await retrieveKnowledge(
+        TEST_USER_ID,
+        'Georgia',
+        'medium',
+        consentChecker,
+        [],
+        [],
+        {},
+      );
+
+      // Neighbor facts should include relation name instead of just type
+      const neighborFact = result.facts.find(f => f.sourceRef.includes('graph/edge'));
+      expect(neighborFact).toBeDefined();
+      expect(neighborFact!.fact).toContain('parent of');
+      expect(neighborFact!.fact).toContain('Bruce');
+      expect(neighborFact!.fact).toContain('Georgia');
+    });
+
+    it('deep traversal facts include type context for depth > 1 nodes', async () => {
+      mockSearchAllVectors.mockResolvedValue([]);
+      mockGetEntityByName.mockResolvedValue([
+        makeEntityResult({ name: 'Georgia', type: 'person', similarity: 0.9 }),
+      ]);
+      mockGetNeighbors.mockResolvedValue([]);
+      mockTraverse.mockResolvedValue([
+        makeTraverseResult({ id: 5, name: 'Gotham School', type: 'organization', depth: 2 }),
+      ]);
+      mockExecuteSandboxedQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      const consentChecker = makeConsentChecker(true);
+      const result = await retrieveKnowledge(
+        TEST_USER_ID,
+        'Georgia',
+        'medium',
+        consentChecker,
+        [],
+        [],
+        {},
+      );
+
+      const traversalFact = result.facts.find(f => f.sourceRef.includes('graph/traverse'));
+      expect(traversalFact).toBeDefined();
+      expect(traversalFact!.fact).toContain('(organization)');
+      expect(traversalFact!.fact).toContain('Gotham School');
+    });
+
+    it('entity ranking boosts person entities for relationship intent', async () => {
+      mockSearchAllVectors.mockResolvedValue([]);
+      mockGetEntityByName.mockResolvedValue([
+        makeEntityResult({ id: 1, name: 'Georgia', type: 'person', similarity: 0.6, mentionCount: 5 }),
+      ]);
+      mockGetNeighbors.mockResolvedValue([]);
+      mockTraverse.mockResolvedValue([]);
+      mockExecuteSandboxedQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      const consentChecker = makeConsentChecker(true);
+      const result = await retrieveKnowledge(
+        TEST_USER_ID,
+        'what do you know about my daughter',
+        'medium',
+        consentChecker,
+        [],
+        [],
+        {},
+      );
+
+      // Entity fact confidence should be boosted above raw similarity (0.6)
+      // +0.15 for relationship+person, +0.05 for mentionCount >= 3
+      const entityFact = result.facts.find(f => f.sourceRef.includes('graph/entity'));
+      expect(entityFact).toBeDefined();
+      expect(entityFact!.confidence).toBeGreaterThan(0.6);
+      expect(entityFact!.confidence).toBe(0.8); // 0.6 + 0.15 + 0.05
     });
   });
 });

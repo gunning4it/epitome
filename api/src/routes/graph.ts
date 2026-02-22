@@ -136,7 +136,30 @@ graph.get(
         })
       : [];
 
-    let displayEntities = visibleEntities;
+    // Stable mode filtering: hide low-quality entities for dashboard clarity
+    let stableFiltered = visibleEntities;
+    if (stableMode) {
+      const minConfidence = stableConfidenceMin ?? 0.75;
+      stableFiltered = stableFiltered.filter((entity) => {
+        const meta = entity.meta;
+        const confidence = entity.confidence ?? 0;
+
+        // Filter out entities below confidence threshold
+        if (confidence < minConfidence) return false;
+
+        // Filter out ai_inferred entities with low mention count and low confidence
+        if (meta?.origin === 'ai_inferred' && (entity.mentionCount ?? 0) <= 1 && confidence < 0.5) {
+          return false;
+        }
+
+        // Filter out unvetted status entities below threshold
+        if (meta?.status === 'unvetted' && confidence < minConfidence) return false;
+
+        return true;
+      });
+    }
+
+    let displayEntities = stableFiltered;
     if (!includeDisconnected) {
       const connectedIds = new Set<number>();
       for (const edge of scopedEdges) {

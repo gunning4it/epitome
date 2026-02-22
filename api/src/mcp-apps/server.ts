@@ -17,7 +17,7 @@ import * as tools from '@/services/tools/index.js';
 import { chatgptAdapter } from '@/services/tools/adapters.js';
 import { buildToolContext } from '@/services/tools/context.js';
 import { TOOL_ANNOTATIONS } from './annotations.js';
-import { isCanonicalMcpToolName } from '@/mcp/toolsContract.js';
+import { isCanonicalMcpToolName, TOOL_DESCRIPTIONS } from '@/mcp/toolsContract.js';
 
 /**
  * Extract ToolContext from MCP authInfo extra.
@@ -58,8 +58,7 @@ export function createChatGptMcpServer(): McpServer {
   const server = new McpServer({ name: 'epitome', version: '1.0.0' });
 
   server.registerTool('recall', {
-    description:
-      "Retrieve information Epitome knows about a topic. Default: leave topic empty for user context, provide topic for federated search. Advanced: set mode to 'memory', 'graph', or 'table' with the corresponding options object for direct queries (e.g., SQL via mode='table').",
+    description: TOOL_DESCRIPTIONS.recall,
     inputSchema: {
       topic: z.string().optional().describe('What to search for. Empty = general context at conversation start.'),
       budget: z.enum(['small', 'medium', 'deep']).optional().describe('small=quick, medium=default, deep=research only'),
@@ -106,8 +105,7 @@ export function createChatGptMcpServer(): McpServer {
   }, SERVICE_MAP.recall);
 
   server.registerTool('memorize', {
-    description:
-      "Save or delete a fact, experience, or event. Always provide text. Use storage='memory' for unstructured notes (journal, reflections). Use storage='record' (default) with structured data for trackable items. Set category='profile' for identity updates.",
+    description: TOOL_DESCRIPTIONS.memorize,
     inputSchema: {
       text: z.string().min(1).describe('The fact/experience to save or forget (always required)'),
       category: z.string().optional().describe('Organizer: "books", "meals", "profile", etc.'),
@@ -121,8 +119,7 @@ export function createChatGptMcpServer(): McpServer {
   }, SERVICE_MAP.memorize);
 
   server.registerTool('review', {
-    description:
-      'Check for or resolve memory contradictions. Use "list" to see conflicts, "resolve" with a metaId and resolution to fix one.',
+    description: TOOL_DESCRIPTIONS.review,
     inputSchema: {
       action: z.enum(['list', 'resolve']).describe('Action: "list" to get contradictions, "resolve" to fix one'),
       metaId: z.number().optional().describe('For resolve: ID of memory_meta entry to resolve'),

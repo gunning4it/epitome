@@ -10,7 +10,7 @@ import { createWriteId, ingestProfileUpdate, ingestMemoryText } from '@/services
 import { withUserSchema } from '@/db/client';
 import { logger } from '@/utils/logger';
 import type { McpContext } from '../server.js';
-import type { ProfileData } from '@/services/profile.service';
+import { getLatestProfile, checkIdentityInvariants, type ProfileData } from '@/services/profile.service';
 
 interface UpdateProfileArgs {
   data: ProfileData;
@@ -22,6 +22,34 @@ export async function updateProfile(args: UpdateProfileArgs, context: McpContext
 
   // Consent check
   await requireConsent(userId, agentId, 'profile', 'write');
+
+  // Identity invariant check (pre-check before ingestion)
+  let currentProfileData: Record<string, unknown> = {};
+  try {
+    const currentProfile = await getLatestProfile(userId);
+    currentProfileData = (currentProfile?.data || {}) as Record<string, unknown>;
+  } catch {
+    // Profile may not exist yet — skip identity check
+  }
+
+  const violations = checkIdentityInvariants(
+    currentProfileData as ProfileData,
+    args.data,
+    agentId,
+    args.reason,
+  );
+  const blockedViolations = violations.filter((v) => v.blocked);
+  if (blockedViolations.length > 0) {
+    await logAuditEntry(userId, {
+      agentId,
+      action: 'identity_violation_blocked',
+      resource: 'profile',
+      details: { violations: blockedViolations },
+    });
+    throw new Error(
+      `IDENTITY_VIOLATION: ${blockedViolations.map((v) => v.reason).join('; ')}`,
+    );
+  }
 
   // Audit log
   await logAuditEntry(userId, {
@@ -72,8 +100,19 @@ export async function updateProfile(args: UpdateProfileArgs, context: McpContext
     logger.warn('Profile auto-vectorize failed', { error: String(err) })
   );
 
-  // Update the "user" node name if profile has a name
+  // Update the "user" node name if profile has a name (and identity check passed)
   if (updatedProfile.data.name) {
+    // Log the owner entity rename for audit trail
+    void logAuditEntry(userId, {
+      agentId,
+      action: 'owner_entity_rename',
+      resource: 'profile',
+      details: {
+        newName: updatedProfile.data.name,
+        changedBy: agentId,
+      },
+    }).catch(() => {});
+
     withUserSchema(userId, async (tx) => {
       await tx.unsafe(`
         UPDATE entities

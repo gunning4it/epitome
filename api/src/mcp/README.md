@@ -67,11 +67,17 @@ OAuth 2.0 authorization server metadata for AI platforms that support MCP OAuth.
 
 ## The 3 MCP Tools
 
+Tool descriptions are defined in `toolsContract.ts` and shared across all 3 server implementations.
+
+### Recommended Sequencing
+
+1. **recall** — Call at the start of every conversation (no arguments) to load user context
+2. **memorize** — Save facts the user shares during conversation
+3. **review** — Resolve contradictions when the user corrects stored information
+
 ### 1. `recall`
 
-Retrieve information from profile/tables/vectors/graph with optional routing mode.
-
-### 2. `memorize`
+**Purpose:** Retrieve the user's stored knowledge. Resolves family roles, nicknames, and aliases automatically.
 
 **Arguments:**
 - `topic` (optional): What to search for. Empty = general context at conversation start.
@@ -81,8 +87,6 @@ Retrieve information from profile/tables/vectors/graph with optional routing mod
 - `graph` (optional): For mode `"graph"` — `{ queryType, entityId?, relation?, maxHops?, pattern? }`
 - `table` (optional): For mode `"table"` — `"table_name"` shorthand or `{ table?, filters?, sql?, limit?, offset? }`
 - `tableName` / `sql` / `filters` (optional): Additional top-level shorthands for table mode.
-
-### 3. `review`
 
 **Advanced modes:**
 - `mode:"memory"` → collection-specific vector search (requires `memory` object)
@@ -100,29 +104,36 @@ curl -X POST http://localhost:3000/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall","arguments":{}}}'
 
+# Relationship query — Epitome resolves "my daughter" automatically
+curl -X POST http://localhost:3000/mcp \
+  -H "Authorization: Bearer epi_..." \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"recall","arguments":{"topic":"my daughter"}}}'
+
 # Federated search for a topic
 curl -X POST http://localhost:3000/mcp \
   -H "Authorization: Bearer epi_..." \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"recall","arguments":{"topic":"food preferences"}}}'
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"recall","arguments":{"topic":"food preferences"}}}'
 
 # Direct vector search
 curl -X POST http://localhost:3000/mcp \
   -H "Authorization: Bearer epi_..." \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"recall","arguments":{"mode":"memory","memory":{"collection":"journal","query":"coffee"}}}}'
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"recall","arguments":{"mode":"memory","memory":{"collection":"journal","query":"coffee"}}}}'
 
 # SQL query against a specific table
 curl -X POST http://localhost:3000/mcp \
   -H "Authorization: Bearer epi_..." \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"recall","arguments":{"mode":"table","table":"meals","sql":"SELECT * FROM meals WHERE calories > 500 LIMIT 10"}}}'
+  -d '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"recall","arguments":{"mode":"table","table":"meals","sql":"SELECT * FROM meals WHERE calories > 500 LIMIT 10"}}}'
 ```
 
-### 2. memorize
+### 2. `memorize`
 
 **Purpose:** Save or delete a fact, experience, or event.
 

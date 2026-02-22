@@ -194,13 +194,21 @@ profile.patch(
     const writeId = createWriteId();
 
     // Update profile
-    const updated = await ingestProfileUpdate({
-      userId,
-      patch: body,
-      changedBy,
-      origin,
-      writeId,
-    });
+    let updated;
+    try {
+      updated = await ingestProfileUpdate({
+        userId,
+        patch: body,
+        changedBy,
+        origin,
+        writeId,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('IDENTITY_VIOLATION')) {
+        return c.json({ error: error.message }, 409);
+      }
+      throw error;
+    }
 
     // Log audit entry
     await logAuditEntry(userId, {

@@ -18,6 +18,7 @@ import { queryTable } from './queryTable.js';
 import { listTables } from './listTables.js';
 import type { ToolContext, ToolResult } from './types.js';
 import { toolFailure, ToolErrorCode } from './types.js';
+import { getFlag } from '@/services/featureFlags';
 
 export interface RecallArgs {
   topic?: string;
@@ -87,6 +88,17 @@ export async function recall(
             'INVALID_ARGS: graph object requires "queryType" ("traverse" or "pattern").',
             false,
           );
+        }
+        // When flag enabled, try structured graph query first
+        if (getFlag('FEATURE_RECALL_STRUCTURED_GRAPH_PREFERRED') && typeof args.graph.pattern === 'string') {
+          try {
+            const parsed = JSON.parse(args.graph.pattern);
+            if (typeof parsed === 'object' && parsed !== null) {
+              args.graph.pattern = parsed;
+            }
+          } catch {
+            // Not valid JSON — keep as string regex pattern
+          }
         }
         return queryGraph(args.graph, ctx);
 

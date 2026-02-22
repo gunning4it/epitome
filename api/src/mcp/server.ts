@@ -16,7 +16,7 @@
 // Service layer for facade tools
 import * as toolServices from '@/services/tools/index.js';
 import { buildToolContext } from '@/services/tools/context.js';
-import { CANONICAL_MCP_TOOLS, isCanonicalMcpToolName, type CanonicalMcpToolName } from './toolsContract.js';
+import { CANONICAL_MCP_TOOLS, isCanonicalMcpToolName, TOOL_DESCRIPTIONS, type CanonicalMcpToolName } from './toolsContract.js';
 
 /**
  * MCP Server Context
@@ -46,7 +46,7 @@ export function getToolDefinitions() {
   const definitions = [
     {
       name: 'recall',
-      description: "Retrieve information Epitome knows about a topic. Default: leave topic empty for user context, provide topic for federated search. Advanced: set mode to 'memory', 'graph', or 'table' with the corresponding options object for direct queries (e.g., SQL via mode='table').",
+      description: TOOL_DESCRIPTIONS.recall,
       inputSchema: {
         type: 'object',
         properties: {
@@ -133,7 +133,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'memorize',
-      description: "Save or delete a fact, experience, or event. Always provide text. Use storage='memory' for unstructured notes (journal, reflections). Use storage='record' (default) with structured data for trackable items. Set category='profile' for identity updates.",
+      description: TOOL_DESCRIPTIONS.memorize,
       inputSchema: {
         type: 'object',
         properties: {
@@ -173,7 +173,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'review',
-      description: 'Check for or resolve memory contradictions. Use "list" to see conflicts, "resolve" with a metaId and resolution to fix one.',
+      description: TOOL_DESCRIPTIONS.review,
       inputSchema: {
         type: 'object',
         properties: {

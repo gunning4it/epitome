@@ -16,6 +16,7 @@ import { Entity, Edge, MemoryMeta } from '@/db/schema';
 import { createMemoryMetaInternal, ORIGIN_CONFIDENCE, registerContradictionInternal } from './memoryQuality.service';
 import { withTierLimitLock } from './metering.service';
 import { validateEdge, normalizeEdgeRelation, insertEdgeQuarantine, type EntityType } from './ontology';
+import { getFlag } from './featureFlags';
 import { logger } from '@/utils/logger';
 
 // Re-export ontology types for downstream consumers
@@ -249,10 +250,16 @@ async function getEntityByNameInternal(
       first_seen as "firstSeen",
       last_seen as "lastSeen",
       _deleted_at as "deletedAt",
-      similarity(name, $1) as similarity
+      GREATEST(
+        similarity(name, $1),
+        COALESCE(similarity(properties->>'nickname', $1), 0)
+      ) as similarity
     FROM entities
     WHERE _deleted_at IS NULL
-      AND similarity(name, $1) > $2
+      AND (
+        similarity(name, $1) > $2
+        OR similarity(properties->>'nickname', $1) > $2
+      )
   `;
 
   const params: unknown[] =[name, similarityThreshold];
@@ -615,31 +622,54 @@ export async function getEntityByName(
   limit = 10
 ): Promise<EntitySearchResult[]> {
   return withUserSchema(userId, async (tx) => {
-    let query = `
-      SELECT
-        id, type, name, properties, confidence,
-        mention_count AS "mentionCount",
-        first_seen AS "firstSeen",
-        last_seen AS "lastSeen",
-        _deleted_at AS "deletedAt",
-        similarity(name, $1) as similarity
-      FROM entities
-      WHERE _deleted_at IS NULL
-    `;
+    // Search by name similarity OR alias/nickname match in properties JSONB.
+    // Uses UNION to combine name-based trigram search with alias containment.
+    const typeFilter = type ? ` AND type = $2` : '';
+    const params: unknown[] = [name];
+    if (type) params.push(type);
 
-    const params: unknown[] =[name];
-
-    if (type) {
-      query += ` AND type = $2`;
-      params.push(type);
-    }
-
-    query += `
-        AND similarity(name, $1) >= $${params.length + 1}
-      ORDER BY similarity DESC
-      LIMIT $${params.length + 2}
-    `;
+    const thresholdIdx = params.length + 1;
+    const limitIdx = params.length + 2;
     params.push(similarityThreshold, limit);
+
+    const query = `
+      WITH name_matches AS (
+        SELECT
+          id, type, name, properties, confidence,
+          mention_count AS "mentionCount",
+          first_seen AS "firstSeen",
+          last_seen AS "lastSeen",
+          _deleted_at AS "deletedAt",
+          similarity(name, $1) as similarity
+        FROM entities
+        WHERE _deleted_at IS NULL
+          ${typeFilter}
+          AND similarity(name, $1) >= $${thresholdIdx}
+      ),
+      alias_matches AS (
+        SELECT
+          id, type, name, properties, confidence,
+          mention_count AS "mentionCount",
+          first_seen AS "firstSeen",
+          last_seen AS "lastSeen",
+          _deleted_at AS "deletedAt",
+          0.85::float as similarity
+        FROM entities
+        WHERE _deleted_at IS NULL
+          ${typeFilter}
+          AND properties ? 'aliases'
+          AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(properties->'aliases') alias
+            WHERE similarity(alias, $1) >= $${thresholdIdx}
+          )
+          AND id NOT IN (SELECT id FROM name_matches)
+      )
+      SELECT * FROM name_matches
+      UNION ALL
+      SELECT * FROM alias_matches
+      ORDER BY similarity DESC
+      LIMIT $${limitIdx}
+    `;
 
     const result = await tx.unsafe<(Entity & { similarity: number })[]>(query, params);
 
@@ -670,7 +700,7 @@ export async function createEdge(
   userId: string,
   input: CreateEdgeInput
 ): Promise<EdgeWithMeta | null> {
-  return withUserSchema(userId, async (tx) => {
+  const result = await withUserSchema(userId, async (tx) => {
     const normalizedRelation = normalizeEdgeRelation(input.relation);
     const relationWasNormalized = normalizedRelation !== input.relation;
     const edgeProperties = { ...(input.properties ?? {}) };
@@ -821,6 +851,8 @@ export async function createEdge(
       return {
         ...updated,
         meta: meta ?? null,
+        _sourceName: source.name,
+        _targetName: target.name,
       };
     }
 
@@ -907,7 +939,59 @@ export async function createEdge(
     return {
       ...edge,
       meta,
+      _sourceName: source.name,
+      _targetName: target.name,
     };
+  });
+
+  // Fire-and-forget edge summary vectorization (outside transaction)
+  if (result && getFlag('FEATURE_GRAPH_EDGE_VECTORIZATION')) {
+    const { _sourceName, _targetName, ...edgeData } = result;
+    const summaryText = `${_sourceName} ${edgeData.relation} ${_targetName}`;
+    void vectorizeEdgeSummary(userId, edgeData.id, summaryText, {
+      sourceId: edgeData.sourceId,
+      targetId: edgeData.targetId,
+      relation: edgeData.relation,
+      sourceName: _sourceName,
+      targetName: _targetName,
+      confidence: edgeData.confidence,
+      agentSource: input.agentSource,
+    }).catch((err) =>
+      logger.warn('Edge summary vectorization failed', { edgeId: edgeData.id, error: String(err) })
+    );
+    return edgeData as EdgeWithMeta;
+  }
+
+  if (result) {
+    const { _sourceName, _targetName, ...edgeData } = result;
+    return edgeData as EdgeWithMeta;
+  }
+  return result;
+}
+
+/**
+ * Vectorize an edge summary into the 'graph_edges' collection.
+ * Non-blocking — called fire-and-forget after edge creation.
+ */
+async function vectorizeEdgeSummary(
+  userId: string,
+  edgeId: number,
+  summaryText: string,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  const { ingestMemoryText } = await import('./writeIngestion.service');
+  await ingestMemoryText({
+    userId,
+    collection: 'graph_edges',
+    text: summaryText,
+    metadata: {
+      source: 'edge_create',
+      edgeId,
+      ...metadata,
+    },
+    changedBy: (metadata.agentSource as string) || 'system',
+    origin: 'ai_inferred',
+    sourceRefHint: `edge:${edgeId}`,
   });
 }
 

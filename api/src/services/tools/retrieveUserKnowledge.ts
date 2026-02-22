@@ -107,10 +107,30 @@ export async function retrieveUserKnowledge(
     // Merge metadata loading warnings
     result.warnings.push(...warnings);
 
+    // Build diagnostics metadata for observability
+    const diagnosticsMeta: Record<string, unknown> = {
+      intent: result.intent,
+      seedTerms: [
+        topic,
+        ...topic.split(/\s+/),
+        ...result.intent.expandedTerms,
+      ]
+        .map((t) => t.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim())
+        .filter((t) => t.length >= 3)
+        .filter((v, i, a) => a.indexOf(v) === i),
+      profilePathsMatched: result.facts
+        .filter((f) => f.sourceType === 'profile')
+        .map((f) => f.sourceRef),
+    };
+
+    if (result.warnings.length > 0) {
+      diagnosticsMeta.warnings = result.warnings;
+    }
+
     return toolSuccess(
       result,
       `Retrieved ${result.facts.length} facts about "${topic}"`,
-      result.warnings.length > 0 ? { warnings: result.warnings } : undefined,
+      diagnosticsMeta,
     );
   } catch (error) {
     return toolFailure(

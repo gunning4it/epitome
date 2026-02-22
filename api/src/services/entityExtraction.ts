@@ -587,6 +587,26 @@ const LOW_SIGNAL_NAMES = new Set([
   'yes',
   'no',
   'n/a',
+  'user',
+  'profile',
+  'data',
+  'record',
+  'entry',
+  'item',
+  'thing',
+  'update',
+  'note',
+  'notes',
+  'info',
+  'general',
+  'other',
+  'misc',
+  'default',
+  'new',
+  'old',
+  'current',
+  'previous',
+  'latest',
 ]);
 
 const LOW_SIGNAL_BY_TYPE: Partial<Record<ExtractedEntity['type'], Set<string>>> = {
@@ -776,6 +796,13 @@ function shouldDropExtractedEntity(entity: ExtractedEntity): boolean {
   if (LOW_SIGNAL_NAMES.has(lower)) return true;
   if (LOW_SIGNAL_BY_TYPE[entity.type]?.has(lower)) return true;
   if (/^[a-z]+(?:_[a-z0-9]+)+$/.test(lower) && !lower.includes(' ')) return true;
+
+  // Drop names starting with system/metadata terms
+  if (/^(profile|table|collection|vector|memory|audit|system)\b/i.test(lower)) return true;
+  // Drop pure numeric strings
+  if (/^\d+$/.test(lower)) return true;
+  // Drop short generic words when type is 'topic'
+  if (lower.length <= 3 && entity.type === 'topic') return true;
 
   return false;
 }

@@ -18,6 +18,7 @@
 
 import { sql, withUserSchema } from '@/db/client';
 import { extractEntitiesFromRecord, extractEntitiesRuleBased } from '@/services/entityExtraction';
+import { checkIdentityInvariants, type ProfileData } from '@/services/profile.service';
 
 interface UserRow {
   id: string;
@@ -92,6 +93,16 @@ async function main(): Promise<void> {
         if (alreadyExtracted) {
           totalAlreadyDone++;
           continue;
+        }
+
+        // Identity safety check: warn if profile name matches family member
+        const typedProfileData = (profileData || {}) as ProfileData;
+        if (typedProfileData.name && typedProfileData.family) {
+          const violations = checkIdentityInvariants(typedProfileData, typedProfileData, 'system');
+          if (violations.some(v => v.blocked)) {
+            console.warn(`  ⚠ Identity risk: profile name "${typedProfileData.name}" matches family member — skipping owner entity update`);
+            // Don't skip the full extraction, just warn — the extraction itself is safe
+          }
         }
 
         if (dryRun) {

@@ -36,6 +36,11 @@ export interface ToolSuccess<T = unknown> {
     pagination?: { offset: number; limit: number; total: number };
     warnings?: string[];
     source?: string;
+    /** Retrieval diagnostics (intent, seed terms, matched paths) */
+    intent?: unknown;
+    seedTerms?: string[];
+    profilePathsMatched?: string[];
+    [key: string]: unknown;
   };
 }
 
