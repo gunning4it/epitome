@@ -345,6 +345,78 @@ OpenClaw (local compute) → MCP → Epitome (memory layer)
 
 ---
 
+## Comparison with Alternatives
+
+Epitome is compared against three leading AI memory solutions. Each comparison is a three-way matrix covering architecture, memory model, knowledge graph, privacy, agent support, developer experience, and pricing.
+
+### Epitome vs Mem0 vs Supermemory
+
+URL: https://epitome.fyi/comparison/mem0
+
+| Dimension | Epitome | Mem0 | Supermemory |
+|-----------|---------|------|-------------|
+| Type | Open-source personal AI database | Managed memory SaaS | Open-source bookmark memory |
+| Self-hostable | Yes (Docker + PostgreSQL) | No (cloud only) | Yes |
+| License | MIT | Partial open source | MIT |
+| Knowledge graph | Full (typed entities, weighted edges, recursive CTE traversal) | Basic entity extraction | None |
+| Confidence scoring | Yes (promote/demote/decay lifecycle) | No | No |
+| MCP support | 9 tools via Streamable HTTP | No | No |
+| Consent system | Per-tool granular with audit | No | No |
+| Data isolation | Per-user PostgreSQL schemas | API key scoped | User-level |
+| Pricing | Free (self-host) or from $0/mo (hosted) | From $99/mo | Free (self-host) or from $10/mo |
+
+**Key differences:**
+- Epitome builds a structured knowledge graph; Mem0 stores flat key-value memories; Supermemory captures bookmarks and web content.
+- Epitome runs on your own PostgreSQL with full schema isolation; Mem0 is cloud-only managed infrastructure.
+- Every Epitome memory has a confidence score with reinforcement and decay; Mem0 and Supermemory have binary store/delete.
+
+### Epitome vs Supermemory vs Vertex AI RAG
+
+URL: https://epitome.fyi/comparison/supermemory
+
+| Dimension | Epitome | Supermemory | Vertex AI RAG |
+|-----------|---------|-------------|---------------|
+| Type | Personal AI database | Bookmark memory tool | Enterprise RAG service |
+| Self-hostable | Yes | Yes | No (Google Cloud only) |
+| License | MIT | MIT | Proprietary |
+| Purpose | AI agent memory & identity | Personal bookmarks & notes | Enterprise document retrieval |
+| MCP support | 9 tools via Streamable HTTP | No | No |
+| Knowledge graph | Full (3 extraction methods) | None | None |
+| Vendor lock-in | None | Low | Google Cloud |
+| Pricing | Free (self-host) or from $0/mo | Free (self-host) or from $10/mo | Pay-per-query (GCP billing) |
+
+**Key differences:**
+- Epitome is purpose-built for AI agents with structured profiles and semantic memory; Supermemory focuses on personal bookmarks; Vertex AI RAG indexes enterprise documents.
+- Epitome speaks MCP natively with 9 specialized tools; Supermemory and Vertex AI RAG are REST-only.
+- Epitome's memory quality engine (promote/demote, contradiction detection, nightly decay) keeps context trustworthy over time.
+
+### Epitome vs Vertex AI RAG vs Mem0
+
+URL: https://epitome.fyi/comparison/vertexrag
+
+| Dimension | Epitome | Vertex AI RAG | Mem0 |
+|-----------|---------|---------------|------|
+| Type | Personal AI database | Enterprise RAG service | Managed memory SaaS |
+| Self-hostable | Yes | No (Google Cloud) | No (cloud only) |
+| License | MIT | Proprietary | Partial open source |
+| Focus | Personal identity & memory | Document retrieval & grounding | LLM conversation memory |
+| Consent | Per-tool granular with audit | IAM roles | None |
+| Knowledge graph | Full (entities, edges, dedup) | None | Basic |
+| Data export | Full SQL dump | GCS bucket | API export |
+| Vendor lock-in | None | Google Cloud | High |
+| Pricing | Free (self-host) or from $0/mo | Pay-per-query (GCP) | From $99/mo |
+
+**Key differences:**
+- Epitome builds a persistent identity layer for individuals; Vertex AI RAG retrieves enterprise documents; Mem0 stores conversation memories.
+- Epitome is MIT-licensed and runs anywhere Docker does; Vertex AI RAG requires a GCP project; Mem0 is cloud-only.
+- Epitome's consent system gives users per-tool control with full audit trail; Vertex uses GCP IAM; Mem0 has no consent layer.
+
+### Comparison Hub
+
+All comparisons: https://epitome.fyi/comparison
+
+---
+
 ## Links
 
 - Website: https://epitome.fyi
@@ -355,5 +427,9 @@ OpenClaw (local compute) → MCP → Epitome (memory layer)
 - Self-Hosting: https://epitome.fyi/docs/self-hosting
 - Architecture: https://epitome.fyi/docs/architecture
 - Billing & Agents: https://epitome.fyi/docs/billing
+- Comparisons: https://epitome.fyi/comparison
+- Epitome vs Mem0 vs Supermemory: https://epitome.fyi/comparison/mem0
+- Epitome vs Supermemory vs Vertex AI RAG: https://epitome.fyi/comparison/supermemory
+- Epitome vs Vertex AI RAG vs Mem0: https://epitome.fyi/comparison/vertexrag
 - GitHub: https://github.com/gunning4it/epitome
 - OpenClaw: https://openclaw.ai

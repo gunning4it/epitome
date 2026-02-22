@@ -24,8 +24,19 @@ Epitome gives every AI agent a shared, persistent memory of the user. It is open
 - Documentation: https://epitome.fyi/docs
 - API Reference: https://epitome.fyi/docs/api-reference
 - MCP Tools: https://epitome.fyi/docs/mcp-tools
+- Comparisons: https://epitome.fyi/comparison
 - GitHub: https://github.com/gunning4it/epitome
 - Full LLM Documentation: https://epitome.fyi/llms-full.txt
+
+## How Epitome Compares
+
+Epitome is compared against three leading AI memory solutions:
+
+- **Epitome vs Mem0 vs Supermemory**: https://epitome.fyi/comparison/mem0 — Self-hosted knowledge graph vs managed memory SaaS vs bookmark memory. Schema isolation, MCP tools, consent system, and pricing compared.
+- **Epitome vs Supermemory vs Vertex AI RAG**: https://epitome.fyi/comparison/supermemory — Structured identity layer vs bookmark memory vs enterprise RAG. Architecture, agent support, and self-hosting compared.
+- **Epitome vs Vertex AI RAG vs Mem0**: https://epitome.fyi/comparison/vertexrag — Personal memory vault vs enterprise document retrieval vs managed SaaS. Privacy, cost, and vendor independence compared.
+
+Key differentiators: Epitome is open source (MIT), self-hostable, has a structured knowledge graph with confidence scoring and contradiction detection, offers 9 MCP tools over Streamable HTTP, and provides per-user schema isolation with granular consent.
 
 ## MCP Server
 
