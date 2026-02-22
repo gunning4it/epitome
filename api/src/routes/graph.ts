@@ -167,7 +167,7 @@ graph.get(
         connectedIds.add(edge.targetId);
       }
 
-      displayEntities = visibleEntities.filter((entity) => connectedIds.has(entity.id));
+      displayEntities = stableFiltered.filter((entity) => connectedIds.has(entity.id));
       const displayEntityIds = new Set(displayEntities.map((entity) => entity.id));
       scopedEdges = scopedEdges.filter(
         (edge) => displayEntityIds.has(edge.sourceId) && displayEntityIds.has(edge.targetId),

@@ -31,6 +31,7 @@ export default function Graph() {
     includeDisconnected,
     stableMode,
     stableConfidenceMin: 0.75,
+    limit: 500,
     edgeLimit: 600,
     edgeOffset: 0,
   });

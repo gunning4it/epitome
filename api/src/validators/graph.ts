@@ -8,6 +8,16 @@ import { z } from 'zod';
 import { ENTITY_TYPES } from '@/services/graphService';
 
 /**
+ * Boolean query param parser.
+ * z.coerce.boolean() uses Boolean(val) which treats "false" as true.
+ * This handles string "true"/"false" from URL query params correctly.
+ */
+const queryBool = z.preprocess(
+  (val) => typeof val === 'string' ? val === 'true' : Boolean(val),
+  z.boolean(),
+);
+
+/**
  * Entity ID path parameter
  */
 export const entityIdSchema = z.object({
@@ -74,11 +84,11 @@ export const entityListQuerySchema = z.object({
   confidenceMax: z.coerce.number().min(0).max(1).optional(),
   limit: z.coerce.number().int().positive().max(500).default(50),
   offset: z.coerce.number().int().min(0).default(0),
-  includeSynthetic: z.coerce.boolean().default(false),
-  includeDisconnected: z.coerce.boolean().default(false),
+  includeSynthetic: queryBool.default(false),
+  includeDisconnected: queryBool.default(false),
   edgeLimit: z.coerce.number().int().positive().max(2000).default(200),
   edgeOffset: z.coerce.number().int().min(0).default(0),
-  stableMode: z.coerce.boolean().default(false),
+  stableMode: queryBool.default(false),
   stableConfidenceMin: z.coerce.number().min(0).max(1).default(0.75),
 }).strict();
 

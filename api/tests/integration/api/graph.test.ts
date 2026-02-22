@@ -183,6 +183,13 @@ describe('Graph API Integration Tests', () => {
     });
 
     it('should return all edges in stableMode (edges scoped to visible entities only)', async () => {
+      // Bump entity confidence above the stableConfidenceMin threshold
+      await db.execute(sql.raw(`
+        UPDATE ${testUser.schemaName}.entities
+        SET confidence = 0.99
+        WHERE id IN (${aliceId}, ${bobId}, ${davidId})
+      `));
+
       const stableEdgeResult = await db.execute(sql.raw(`
         INSERT INTO ${testUser.schemaName}.edges
         (source_id, target_id, relation, weight, confidence)
@@ -215,10 +222,25 @@ describe('Graph API Integration Tests', () => {
       expect(response.status).toBe(200);
       const data = await response.json();
       const edgeIds = new Set(data.edges.map((edge: any) => edge.id));
-      // Stable mode no longer filters edges — edges are scoped to visible entities by SQL
+      // Edges between visible (high-confidence) entities are returned
       expect(edgeIds.has(stableEdgeId)).toBe(true);
       expect(edgeIds.has(inferredEdgeId)).toBe(true);
       expect(data.meta.stableMode).toBe(true);
+    });
+
+    it('should parse stableMode=false as boolean false (not truthy string)', async () => {
+      // Regression test: z.coerce.boolean() treats "false" string as true.
+      // With stableMode actually OFF, all entities should appear.
+      const response = await app.request('/v1/graph/entities?stableMode=false&includeDisconnected=true', {
+        method: 'GET',
+        headers: createTestAuthHeaders(testUser),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      // All 4 entities visible when stable mode is genuinely off
+      expect(data.entities.length).toBe(4);
+      expect(data.meta.stableMode).toBe(false);
     });
 
     it('should exclude soft-deleted entities', async () => {
