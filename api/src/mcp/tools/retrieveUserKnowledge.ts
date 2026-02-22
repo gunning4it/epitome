@@ -26,7 +26,7 @@ export async function retrieveUserKnowledge(args: RetrieveUserKnowledgeArgs, con
   // Audit log
   await logAuditEntry(userId, {
     agentId,
-    action: 'mcp_retrieve_user_knowledge',
+    action: 'mcp_recall',
     resource: 'knowledge',
     details: { topic: args.topic, budget: args.budget },
   });

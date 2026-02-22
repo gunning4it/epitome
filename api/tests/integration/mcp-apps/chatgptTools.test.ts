@@ -72,6 +72,7 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
   let app: Hono<HonoEnv>;
 
   beforeEach(async () => {
+    delete process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION;
     testUser = await createTestUser();
     app = buildTestApp();
 
@@ -89,6 +90,7 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
   });
 
   afterEach(async () => {
+    delete process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION;
     await cleanupTestUser(testUser.userId);
   });
 
@@ -169,7 +171,7 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     expect(body.result.structuredContent).toHaveProperty('profile');
   });
 
-  it('translates legacy list_tables through recall facade', async () => {
+  it('rejects legacy tool names by default', async () => {
     const response = await jsonRpc(
       app,
       'tools/call',
@@ -179,14 +181,16 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
 
     expect(response.status).toBe(200);
     const body = await parseResponse(response);
-    expect(body.result).toBeDefined();
-    expect(body.result.isError).toBeUndefined();
-    expect(body.result.structuredContent).toHaveProperty('tables');
+    const serialized = JSON.stringify(body);
+    expect(serialized).toMatch(/TOOL_NOT_FOUND|Unknown tool|not found/i);
   });
 
-  it('translates legacy add_record through memorize facade', async () => {
+  it('translates legacy names only when compatibility flag is enabled', async () => {
+    process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION = 'true';
+    const translatedApp = buildTestApp();
+
     const response = await jsonRpc(
-      app,
+      translatedApp,
       'tools/call',
       {
         name: 'add_record',
@@ -203,43 +207,6 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     expect(body.result).toBeDefined();
     expect(body.result.isError).toBeUndefined();
     expect(body.result.structuredContent).toHaveProperty('table', 'books');
-  });
-
-  it('translates legacy query_table through recall facade', async () => {
-    // Seed a table row via translated legacy add_record first
-    const seedResponse = await jsonRpc(
-      app,
-      'tools/call',
-      {
-        name: 'add_record',
-        arguments: {
-          table: 'books',
-          data: { title: 'Hyperion', rating: 5 },
-        },
-      },
-      authHeaders(testUser.userId),
-    );
-    expect(seedResponse.status).toBe(200);
-
-    const response = await jsonRpc(
-      app,
-      'tools/call',
-      {
-        name: 'query_table',
-        arguments: {
-          table: 'books',
-          filters: { title: 'Hyperion' },
-        },
-      },
-      authHeaders(testUser.userId),
-    );
-
-    expect(response.status).toBe(200);
-    const body = await parseResponse(response);
-    expect(body.result).toBeDefined();
-    expect(body.result.isError).toBeUndefined();
-    expect(body.result.structuredContent).toHaveProperty('table', 'books');
-    expect(body.result.structuredContent).toHaveProperty('records');
   });
 
   it('returns isError true on consent denied', async () => {

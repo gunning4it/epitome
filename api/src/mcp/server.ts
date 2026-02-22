@@ -16,6 +16,7 @@
 // Service layer for facade tools
 import * as toolServices from '@/services/tools/index.js';
 import { buildToolContext } from '@/services/tools/context.js';
+import { CANONICAL_MCP_TOOLS, isCanonicalMcpToolName, type CanonicalMcpToolName } from './toolsContract.js';
 
 /**
  * MCP Server Context
@@ -29,7 +30,10 @@ export interface McpContext {
 }
 
 // Facade tools use the service layer directly
-const FACADE_TOOLS: Record<string, (args: any, ctx: toolServices.ToolContext) => Promise<toolServices.ToolResult>> = {
+const FACADE_TOOLS: Record<
+  CanonicalMcpToolName,
+  (args: any, ctx: toolServices.ToolContext) => Promise<toolServices.ToolResult>
+> = {
   recall: toolServices.recall,
   memorize: toolServices.memorize,
   review: toolServices.review,
@@ -39,7 +43,7 @@ const FACADE_TOOLS: Record<string, (args: any, ctx: toolServices.ToolContext) =>
  * Get tool definitions
  */
 export function getToolDefinitions() {
-  return [
+  const definitions = [
     {
       name: 'recall',
       description: "Retrieve information Epitome knows about a topic. Default: leave topic empty for user context, provide topic for federated search. Advanced: set mode to 'memory', 'graph', or 'table' with the corresponding options object for direct queries (e.g., SQL via mode='table').",
@@ -181,6 +185,16 @@ export function getToolDefinitions() {
       },
     },
   ];
+
+  const names = definitions.map((definition) => definition.name).sort();
+  const canonicalNames = [...CANONICAL_MCP_TOOLS].sort();
+  if (JSON.stringify(names) !== JSON.stringify(canonicalNames)) {
+    throw new Error(
+      `Tool definition drift detected. Expected [${canonicalNames.join(', ')}], got [${names.join(', ')}].`,
+    );
+  }
+
+  return definitions;
 }
 
 /**
@@ -194,10 +208,10 @@ export async function executeTool(
   args: unknown,
   context: McpContext
 ): Promise<toolServices.ToolResult> {
-  const facadeTool = FACADE_TOOLS[toolName];
-  if (!facadeTool) {
+  if (!isCanonicalMcpToolName(toolName)) {
     throw new Error(`TOOL_NOT_FOUND: Unknown tool '${toolName}'`);
   }
+  const facadeTool = FACADE_TOOLS[toolName];
 
   const toolContext = buildToolContext({
     userId: context.userId,

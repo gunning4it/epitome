@@ -177,18 +177,21 @@ function ApiKeyResult({ apiKey, agentName, onDone }: {
     },
   }, null, 2);
 
-  const curlSnippet = `curl -X POST ${API_BASE_URL}/mcp/call/recall \\
+  const curlSnippet = `curl -X POST ${API_BASE_URL}/mcp \\
   -H "Authorization: Bearer ${apiKey}" \\
   -H "Content-Type: application/json" \\
-  -d '{}'`;
+  -H "Accept: application/json, text/event-stream" \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall","arguments":{}}}'`;
 
   const restSnippet = `Base URL: ${API_BASE_URL}
 Auth Header: Authorization: Bearer ${apiKey}
 
-GET  /mcp/tools                    - List all tools
-POST /mcp/call/recall       - Search or load context
-POST /mcp/call/memorize     - Save or delete data
-POST /mcp/call/review       - Manage contradictions`;
+POST /mcp
+- initialize               - MCP handshake
+- tools/list               - List canonical tools
+- tools/call               - Call recall / memorize / review
+
+Legacy /mcp/tools and /mcp/call/:toolName are disabled by default.`;
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onDone(); }}>
@@ -226,7 +229,7 @@ POST /mcp/call/review       - Manage contradictions`;
                 <TabsTrigger value="claude-ai">Claude</TabsTrigger>
                 <TabsTrigger value="openai">ChatGPT</TabsTrigger>
                 <TabsTrigger value="curl">curl</TabsTrigger>
-                <TabsTrigger value="rest">REST API</TabsTrigger>
+                <TabsTrigger value="rest">JSON-RPC</TabsTrigger>
               </TabsList>
               <TabsContent value="mcp" className="mt-3 space-y-2">
                 <p className="text-xs text-muted-foreground">
@@ -364,17 +367,20 @@ function AgentCard({ agent }: { agent: AgentWithConsent }) {
       },
     },
   }, null, 2);
-  const curlSnippet = `curl -X POST ${API_BASE_URL}/mcp/call/recall \\
+  const curlSnippet = `curl -X POST ${API_BASE_URL}/mcp \\
   -H "Authorization: Bearer ${placeholder}" \\
   -H "Content-Type: application/json" \\
-  -d '{}'`;
+  -H "Accept: application/json, text/event-stream" \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall","arguments":{}}}'`;
   const restSnippet = `Base URL: ${API_BASE_URL}
 Auth Header: Authorization: Bearer ${placeholder}
 
-GET  /mcp/tools                    - List all tools
-POST /mcp/call/recall       - Search or load context
-POST /mcp/call/memorize     - Save or delete data
-POST /mcp/call/review       - Manage contradictions`;
+POST /mcp
+- initialize               - MCP handshake
+- tools/list               - List canonical tools
+- tools/call               - Call recall / memorize / review
+
+Legacy /mcp/tools and /mcp/call/:toolName are disabled by default.`;
 
   return (
     <Card>
@@ -504,7 +510,7 @@ POST /mcp/call/review       - Manage contradictions`;
                   <TabsTrigger value="claude-ai">Claude</TabsTrigger>
                   <TabsTrigger value="openai">ChatGPT</TabsTrigger>
                   <TabsTrigger value="curl">curl</TabsTrigger>
-                  <TabsTrigger value="rest">REST API</TabsTrigger>
+                  <TabsTrigger value="rest">JSON-RPC</TabsTrigger>
                 </TabsList>
                 <TabsContent value="mcp" className="mt-3 space-y-2">
                   <p className="text-xs text-muted-foreground">

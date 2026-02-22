@@ -12,11 +12,13 @@ import { Hono } from 'hono';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { createChatGptMcpServer } from './server.js';
 import { rewriteLegacyJsonRpc } from '@/mcp/legacyTranslator.js';
+import { isLegacyToolTranslationEnabled } from '@/mcp/compat.js';
 import { logger } from '@/utils/logger';
 import type { HonoEnv } from '@/types/hono';
 
 export function createChatGptMcpRoutes(): Hono<HonoEnv> {
   const app = new Hono<HonoEnv>();
+  const legacyToolTranslationEnabled = isLegacyToolTranslationEnabled();
 
   app.all('/', async (c) => {
     const userId = c.get('userId');
@@ -39,7 +41,7 @@ export function createChatGptMcpRoutes(): Hono<HonoEnv> {
       let parsedBody: unknown | undefined;
       if (c.req.method === 'POST') {
         const contentType = c.req.header('content-type');
-        if (contentType && contentType.includes('application/json')) {
+        if (legacyToolTranslationEnabled && contentType && contentType.includes('application/json')) {
           try {
             const body = await c.req.raw.clone().json();
             parsedBody = rewriteLegacyJsonRpc(body);

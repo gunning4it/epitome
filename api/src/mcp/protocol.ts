@@ -10,6 +10,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import type { McpContext } from './server.js';
+import { isCanonicalMcpToolName, type CanonicalMcpToolName } from './toolsContract.js';
 
 // Service layer (always used)
 import * as toolServices from '@/services/tools/index.js';
@@ -17,7 +18,10 @@ import { mcpAdapter } from '@/services/tools/adapters.js';
 import { buildToolContext } from '@/services/tools/context.js';
 
 // Map tool names to service functions
-const SERVICE_MAP: Record<string, (args: any, ctx: toolServices.ToolContext) => Promise<toolServices.ToolResult>> = {
+const SERVICE_MAP: Record<
+  CanonicalMcpToolName,
+  (args: any, ctx: toolServices.ToolContext) => Promise<toolServices.ToolResult>
+> = {
   recall: toolServices.recall,
   memorize: toolServices.memorize,
   review: toolServices.review,
@@ -48,13 +52,13 @@ async function callTool(
   extra: Record<string, unknown>,
   toolName: string,
 ): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
-  const serviceFn = SERVICE_MAP[toolName];
-  if (!serviceFn) {
+  if (!isCanonicalMcpToolName(toolName)) {
     return {
       content: [{ type: 'text', text: `TOOL_NOT_FOUND: Unknown tool '${toolName}'.` }],
       isError: true,
     };
   }
+  const serviceFn = SERVICE_MAP[toolName];
 
   try {
     const rawContext = extractContext(extra);

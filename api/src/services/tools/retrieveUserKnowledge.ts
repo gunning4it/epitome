@@ -48,7 +48,7 @@ export async function retrieveUserKnowledge(
   // Audit
   await logAuditEntry(userId, {
     agentId,
-    action: 'mcp_retrieve_user_knowledge',
+    action: 'mcp_recall',
     resource: 'profile',
     details: { topic, budget },
   });

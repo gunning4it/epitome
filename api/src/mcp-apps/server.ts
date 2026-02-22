@@ -17,6 +17,7 @@ import * as tools from '@/services/tools/index.js';
 import { chatgptAdapter } from '@/services/tools/adapters.js';
 import { buildToolContext } from '@/services/tools/context.js';
 import { TOOL_ANNOTATIONS } from './annotations.js';
+import { isCanonicalMcpToolName } from '@/mcp/toolsContract.js';
 
 /**
  * Extract ToolContext from MCP authInfo extra.
@@ -42,6 +43,12 @@ function wrapTool<T>(
     return chatgptAdapter(result);
   };
 }
+
+const SERVICE_MAP = {
+  recall: wrapTool(tools.recall),
+  memorize: wrapTool(tools.memorize),
+  review: wrapTool(tools.review),
+};
 
 /**
  * Create a ChatGPT Apps MCP server with 3 facade tools.
@@ -88,7 +95,7 @@ export function createChatGptMcpServer(): McpServer {
       }).optional().describe('For mode "table": table query options'),
     },
     annotations: TOOL_ANNOTATIONS.recall,
-  }, wrapTool(tools.recall));
+  }, SERVICE_MAP.recall);
 
   server.registerTool('memorize', {
     description:
@@ -103,7 +110,7 @@ export function createChatGptMcpServer(): McpServer {
       metadata: z.record(z.string(), z.unknown()).optional().describe('For storage "memory": optional metadata. Defaults to data.'),
     },
     annotations: TOOL_ANNOTATIONS.memorize,
-  }, wrapTool(tools.memorize));
+  }, SERVICE_MAP.memorize);
 
   server.registerTool('review', {
     description:
@@ -114,7 +121,14 @@ export function createChatGptMcpServer(): McpServer {
       resolution: z.enum(['confirm', 'reject', 'keep_both']).optional().describe('For resolve: how to handle the contradiction'),
     },
     annotations: TOOL_ANNOTATIONS.review,
-  }, wrapTool(tools.review));
+  }, SERVICE_MAP.review);
+
+  // Defensive assertion to keep this server aligned with canonical MCP tools.
+  for (const name of Object.keys(SERVICE_MAP)) {
+    if (!isCanonicalMcpToolName(name)) {
+      throw new Error(`Invalid MCP tool registration: ${name}`);
+    }
+  }
 
   return server;
 }
