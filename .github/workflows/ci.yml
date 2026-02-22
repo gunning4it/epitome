@@ -103,7 +103,46 @@ jobs:
           name: integration-test-results
           path: api/coverage/
 
-  # Job 3: Load Tests (only on release)
+  # Job 3: SDK Lint/Test/Build
+  sdk-check:
+    name: SDK Lint/Test/Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: sdk/package-lock.json
+
+      - name: Install SDK dependencies
+        working-directory: ./sdk
+        run: npm ci
+
+      - name: Run SDK type check
+        working-directory: ./sdk
+        run: npm run lint
+
+      - name: Run SDK tests
+        working-directory: ./sdk
+        run: npm test
+
+      - name: Build SDK
+        working-directory: ./sdk
+        run: npm run build
+
+      - name: Upload SDK build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-build-artifacts
+          path: sdk/dist/
+
+  # Job 4: Load Tests (only on release)
   load-tests:
     name: Load Tests
     runs-on: ubuntu-latest
@@ -164,7 +203,7 @@ jobs:
           name: load-test-results
           path: api/coverage/
 
-  # Job 4: Code Coverage
+  # Job 5: Code Coverage
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
@@ -294,6 +333,7 @@ jobs:
           cache-dependency-path: |
             api/package-lock.json
             dashboard/package-lock.json
+            sdk/package-lock.json
 
       - name: Install API dependencies
         working-directory: ./api
@@ -303,12 +343,20 @@ jobs:
         working-directory: ./dashboard
         run: npm ci
 
+      - name: Install SDK dependencies
+        working-directory: ./sdk
+        run: npm ci
+
       - name: Run npm audit (API)
         working-directory: ./api
         run: npm audit --audit-level=critical
 
       - name: Run npm audit (Dashboard)
         working-directory: ./dashboard
+        run: npm audit --audit-level=critical
+
+      - name: Run npm audit (SDK)
+        working-directory: ./sdk
         run: npm audit --audit-level=critical
 
   # Job 8: Dependency Review (PR only)
@@ -331,7 +379,7 @@ jobs:
   build:
     name: Build Verification
     runs-on: ubuntu-latest
-    needs: [lint, unit-tests]
+    needs: [lint, unit-tests, sdk-check]
     timeout-minutes: 5
 
     steps:

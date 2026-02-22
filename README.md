@@ -175,8 +175,11 @@ See [EPITOME_TECH_SPEC.md](EPITOME_TECH_SPEC.md) for the full architecture.
 
 ## Documentation
 
-- [Quick Start](https://epitome.fyi/docs/quickstart) — Get running in 60 seconds
-- [API Reference](https://epitome.fyi/docs/api) — REST endpoint documentation
+- [Quick Start](https://epitome.fyi/docs/quick-start) — Get running in minutes
+- [JavaScript SDK](https://epitome.fyi/docs/javascript-sdk) — Build with `@epitomefyi/sdk`
+- [npm Package](https://www.npmjs.com/package/@epitomefyi/sdk) — Install and version history
+- [AI SDK Tools](https://epitome.fyi/docs/javascript-sdk-ai-tools) — `searchMemory`, `saveMemory`, `getUserContext` for tool-calling
+- [API Reference](https://epitome.fyi/docs/api-reference) — REST endpoint documentation
 - [MCP Tools](https://epitome.fyi/docs/mcp-tools) — All 3 MCP tools explained
 - [Architecture](EPITOME_TECH_SPEC.md) — Full technical specification
 - [Data Model](EPITOME_DATA_MODEL.md) — Every table, column, and constraint

@@ -23,7 +23,10 @@ const PUBLIC_ROUTES = [
   '/docs/quick-start',
   '/docs/mcp-tools',
   '/docs/api-reference',
+  '/docs/javascript-sdk',
+  '/docs/javascript-sdk-ai-tools',
   '/docs/memory-router',
+  '/docs/billing',
   '/docs/self-hosting',
   '/docs/architecture',
   '/docs/data-model',
@@ -54,9 +57,21 @@ const ROUTE_META: Record<string, { title: string; description: string }> = {
     title: 'API Reference — Epitome Docs',
     description: '22 REST endpoints for programmatic access to your personal AI database.',
   },
+  '/docs/javascript-sdk': {
+    title: 'JavaScript SDK — Epitome Docs',
+    description: 'Build with Epitome using @epitomefyi/sdk, the official TypeScript client.',
+  },
+  '/docs/javascript-sdk-ai-tools': {
+    title: 'AI SDK Tools — Epitome Docs',
+    description: 'Use searchMemory, saveMemory, and getUserContext with Vercel AI SDK tool calling.',
+  },
   '/docs/memory-router': {
     title: 'Memory Router (LLM Proxy) — Epitome Docs',
     description: 'Proxy OpenAI and Anthropic calls through Epitome for automatic memory retrieval and save.',
+  },
+  '/docs/billing': {
+    title: 'Billing & Agents — Epitome Docs',
+    description: 'Plans, pricing, and x402-based payments for autonomous agents.',
   },
   '/docs/self-hosting': {
     title: 'Self-Hosting Guide — Epitome Docs',

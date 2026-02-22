@@ -9,6 +9,8 @@ import DocsIndex from '@/pages/docs/DocsIndex';
 import QuickStart from '@/pages/docs/QuickStart';
 import McpTools from '@/pages/docs/McpTools';
 import ApiReference from '@/pages/docs/ApiReference';
+import JavaScriptSdk from '@/pages/docs/JavaScriptSdk';
+import JavaScriptSdkAiTools from '@/pages/docs/JavaScriptSdkAiTools';
 import MemoryRouter from '@/pages/docs/MemoryRouter';
 import SelfHosting from '@/pages/docs/SelfHosting';
 import Architecture from '@/pages/docs/Architecture';
@@ -16,6 +18,7 @@ import DataModel from '@/pages/docs/DataModel';
 import Contributing from '@/pages/docs/Contributing';
 import Troubleshooting from '@/pages/docs/Troubleshooting';
 import Security from '@/pages/docs/Security';
+import BillingDocs from '@/pages/docs/Billing';
 
 import LegalLayout from '@/components/legal/LegalLayout';
 import PrivacyPolicy from '@/pages/legal/PrivacyPolicy';
@@ -36,6 +39,8 @@ function PublicRoutes() {
         <Route path="quick-start" element={<QuickStart />} />
         <Route path="mcp-tools" element={<McpTools />} />
         <Route path="api-reference" element={<ApiReference />} />
+        <Route path="javascript-sdk" element={<JavaScriptSdk />} />
+        <Route path="javascript-sdk-ai-tools" element={<JavaScriptSdkAiTools />} />
         <Route path="memory-router" element={<MemoryRouter />} />
         <Route path="self-hosting" element={<SelfHosting />} />
         <Route path="architecture" element={<Architecture />} />
@@ -43,6 +48,7 @@ function PublicRoutes() {
         <Route path="contributing" element={<Contributing />} />
         <Route path="troubleshooting" element={<Troubleshooting />} />
         <Route path="security" element={<Security />} />
+        <Route path="billing" element={<BillingDocs />} />
       </Route>
       <Route path="/legal" element={<LegalLayout />}>
         <Route index element={<Navigate to="/legal/privacy" replace />} />
