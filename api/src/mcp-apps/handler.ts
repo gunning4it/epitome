@@ -11,14 +11,12 @@
 import { Hono } from 'hono';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { createChatGptMcpServer } from './server.js';
-import { rewriteLegacyJsonRpc } from '@/mcp/legacyTranslator.js';
-import { isLegacyToolTranslationEnabled } from '@/mcp/compat.js';
+import { rewriteLegacyJsonRpcWithEvents } from '@/mcp/legacyTranslator.js';
 import { logger } from '@/utils/logger';
 import type { HonoEnv } from '@/types/hono';
 
 export function createChatGptMcpRoutes(): Hono<HonoEnv> {
   const app = new Hono<HonoEnv>();
-  const legacyToolTranslationEnabled = isLegacyToolTranslationEnabled();
 
   app.all('/', async (c) => {
     const userId = c.get('userId');
@@ -41,10 +39,19 @@ export function createChatGptMcpRoutes(): Hono<HonoEnv> {
       let parsedBody: unknown | undefined;
       if (c.req.method === 'POST') {
         const contentType = c.req.header('content-type');
-        if (legacyToolTranslationEnabled && contentType && contentType.includes('application/json')) {
+        if (contentType && contentType.includes('application/json')) {
           try {
             const body = await c.req.raw.clone().json();
-            parsedBody = rewriteLegacyJsonRpc(body);
+            const rewritten = rewriteLegacyJsonRpcWithEvents(body);
+            parsedBody = rewritten.body;
+            if (rewritten.rewrites.length > 0) {
+              logger.info('ChatGPT MCP legacy tool aliases normalized', {
+                route: '/chatgpt-mcp',
+                userId,
+                agentId,
+                rewrites: rewritten.rewrites,
+              });
+            }
           } catch {
             // Let transport parse/report malformed JSON-RPC bodies directly.
           }

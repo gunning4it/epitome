@@ -72,7 +72,6 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
   let app: Hono<HonoEnv>;
 
   beforeEach(async () => {
-    delete process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION;
     testUser = await createTestUser();
     app = buildTestApp();
 
@@ -90,7 +89,6 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
   });
 
   afterEach(async () => {
-    delete process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION;
     await cleanupTestUser(testUser.userId);
   });
 
@@ -171,7 +169,7 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     expect(body.result.structuredContent).toHaveProperty('profile');
   });
 
-  it('rejects legacy tool names by default', async () => {
+  it('translates legacy tool names on tools/call ingress', async () => {
     const response = await jsonRpc(
       app,
       'tools/call',
@@ -181,16 +179,14 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
 
     expect(response.status).toBe(200);
     const body = await parseResponse(response);
-    const serialized = JSON.stringify(body);
-    expect(serialized).toMatch(/TOOL_NOT_FOUND|Unknown tool|not found/i);
+    expect(body.result).toBeDefined();
+    expect(body.result.isError).toBeUndefined();
+    expect(body.result.structuredContent).toHaveProperty('tables');
   });
 
-  it('translates legacy names only when compatibility flag is enabled', async () => {
-    process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION = 'true';
-    const translatedApp = buildTestApp();
-
+  it('translates add_record through legacy alias and returns structured content', async () => {
     const response = await jsonRpc(
-      translatedApp,
+      app,
       'tools/call',
       {
         name: 'add_record',
@@ -207,6 +203,37 @@ describe('ChatGPT MCP Tools (/chatgpt-mcp)', () => {
     expect(body.result).toBeDefined();
     expect(body.result.isError).toBeUndefined();
     expect(body.result.structuredContent).toHaveProperty('table', 'books');
+  });
+
+  it('translates get_user_context with no topic to context recall', async () => {
+    const response = await jsonRpc(
+      app,
+      'tools/call',
+      { name: 'get_user_context', arguments: {} },
+      authHeaders(testUser.userId),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await parseResponse(response);
+    expect(body.result).toBeDefined();
+    expect(body.result.isError).toBeUndefined();
+    expect(body.result.structuredContent).toHaveProperty('profile');
+  });
+
+  it('translates get_user_context topic phrases to knowledge recall', async () => {
+    const response = await jsonRpc(
+      app,
+      'tools/call',
+      { name: 'get_user_context', arguments: { topic: 'books read / reading history' } },
+      authHeaders(testUser.userId),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await parseResponse(response);
+    expect(body.result).toBeDefined();
+    expect(body.result.isError).toBeUndefined();
+    expect(body.result.structuredContent).toHaveProperty('topic', 'books read / reading history');
+    expect(Array.isArray(body.result.structuredContent.facts)).toBe(true);
   });
 
   it('returns isError true on consent denied', async () => {

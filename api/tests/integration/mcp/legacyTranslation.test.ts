@@ -50,7 +50,6 @@ describe('MCP canonical tool contract (/mcp)', () => {
   let headers: Headers;
 
   beforeEach(async () => {
-    delete process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION;
     testUser = await createTestUser();
     app = buildTestApp();
     headers = createTestAuthHeaders(testUser, 'test-mcp-agent');
@@ -68,7 +67,6 @@ describe('MCP canonical tool contract (/mcp)', () => {
   });
 
   afterEach(async () => {
-    delete process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION;
     await cleanupTestUser(testUser.userId);
   });
 
@@ -81,7 +79,7 @@ describe('MCP canonical tool contract (/mcp)', () => {
     expect(names).toEqual(['memorize', 'recall', 'review']);
   });
 
-  it('rejects legacy tool names by default', async () => {
+  it('translates legacy tool names on tools/call ingress', async () => {
     const response = await jsonRpc(
       app,
       'tools/call',
@@ -91,8 +89,10 @@ describe('MCP canonical tool contract (/mcp)', () => {
     expect(response.status).toBe(200);
 
     const body = await parseResponse(response);
-    const serialized = JSON.stringify(body);
-    expect(serialized).toMatch(/TOOL_NOT_FOUND|Unknown tool|not found/i);
+    expect(body.result).toBeDefined();
+    expect(body.result.isError).toBeUndefined();
+    const payload = JSON.parse(body.result.content[0].text);
+    expect(payload).toHaveProperty('tables');
   });
 
   it('still executes canonical tools', async () => {
@@ -111,14 +111,11 @@ describe('MCP canonical tool contract (/mcp)', () => {
     expect(payload).toHaveProperty('profile');
   });
 
-  it('optionally translates legacy names only when compatibility flag is enabled', async () => {
-    process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION = 'true';
-    const translatedApp = buildTestApp();
-
+  it('translates get_user_context topic phrases to knowledge retrieval', async () => {
     const response = await jsonRpc(
-      translatedApp,
+      app,
       'tools/call',
-      { name: 'list_tables', arguments: {} },
+      { name: 'get_user_context', arguments: { topic: 'books read / reading history' } },
       headers,
     );
     expect(response.status).toBe(200);
@@ -127,6 +124,7 @@ describe('MCP canonical tool contract (/mcp)', () => {
     expect(body.result).toBeDefined();
     expect(body.result.isError).toBeUndefined();
     const payload = JSON.parse(body.result.content[0].text);
-    expect(payload).toHaveProperty('tables');
+    expect(payload).toHaveProperty('topic', 'books read / reading history');
+    expect(Array.isArray(payload.facts)).toBe(true);
   });
 });

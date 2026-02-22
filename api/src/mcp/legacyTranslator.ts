@@ -5,6 +5,11 @@ export interface LegacyToolTranslation {
   args: Record<string, unknown>;
 }
 
+export interface LegacyRewriteEvent {
+  fromToolName: string;
+  toToolName: string;
+}
+
 const LEGACY_TOOL_NAMES = new Set([
   'get_user_context',
   'retrieve_user_knowledge',
@@ -228,7 +233,7 @@ export function translateLegacyToolCall(
   }
 }
 
-function rewriteJsonRpcMessage(message: unknown): unknown {
+function rewriteJsonRpcMessage(message: unknown, rewrites?: LegacyRewriteEvent[]): unknown {
   if (!isRecord(message)) return message;
   if (message.method !== 'tools/call') return message;
   if (!isRecord(message.params)) return message;
@@ -244,6 +249,10 @@ function rewriteJsonRpcMessage(message: unknown): unknown {
   const args = isRecord(params.arguments) ? params.arguments : {};
   const translated = translateLegacyToolCall(name, args);
   if (!translated) return message;
+  rewrites?.push({
+    fromToolName: name,
+    toToolName: translated.toolName,
+  });
 
   return {
     ...message,
@@ -256,8 +265,22 @@ function rewriteJsonRpcMessage(message: unknown): unknown {
 }
 
 export function rewriteLegacyJsonRpc(body: unknown): unknown {
+  return rewriteLegacyJsonRpcWithEvents(body).body;
+}
+
+export function rewriteLegacyJsonRpcWithEvents(body: unknown): {
+  body: unknown;
+  rewrites: LegacyRewriteEvent[];
+} {
+  const rewrites: LegacyRewriteEvent[] = [];
   if (Array.isArray(body)) {
-    return body.map((message) => rewriteJsonRpcMessage(message));
+    return {
+      body: body.map((message) => rewriteJsonRpcMessage(message, rewrites)),
+      rewrites,
+    };
   }
-  return rewriteJsonRpcMessage(body);
+  return {
+    body: rewriteJsonRpcMessage(body, rewrites),
+    rewrites,
+  };
 }

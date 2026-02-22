@@ -135,6 +135,92 @@ const PREFERENCE_PATTERNS = /\b(like|prefer|favorite|enjoy|love|hate|dislike|bes
 const RELATIONSHIP_PATTERNS = /\b(who\s+(does|do|is|are|did)|knows?|friend|family|colleague|connected|relationship|related|together|introduced|met)\b/i;
 const QUANTITATIVE_PATTERNS = /\b(how\s+many|how\s+much|count|total|average|frequency|number\s+of|sum|statistics|stats)\b/i;
 
+const STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'did', 'do', 'does',
+  'for', 'from', 'had', 'has', 'have', 'he', 'her', 'his', 'i', 'in',
+  'is', 'it', 'its', 'me', 'my', 'of', 'on', 'or', 'our', 'she', 'that',
+  'the', 'their', 'them', 'they', 'this', 'to', 'was', 'we', 'were', 'with',
+  'you', 'your',
+]);
+
+const TIMELINE_EXCEPTION_PATTERNS = /\b(reading\s+history|book\s+history|books\s+history)\b/i;
+const MAX_PROFILE_FACT_DEPTH = 3;
+const MAX_PROFILE_FACTS = 30;
+
+function normalizeSearchText(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeToken(token: string): string {
+  if (!token) return token;
+  if (token.endsWith('ies') && token.length > 4) return `${token.slice(0, -3)}y`;
+  if (token.endsWith('s') && token.length > 3 && !token.endsWith('ss')) return token.slice(0, -1);
+  return token;
+}
+
+function isMeaningfulToken(token: string): boolean {
+  return token.length >= 2 && !STOP_WORDS.has(token);
+}
+
+function buildSearchTerms(topic: string, expandedTerms: string[] = []): string[] {
+  const topicTokens = normalizeSearchText(topic)
+    .split(/\s+/)
+    .map(normalizeToken)
+    .filter(isMeaningfulToken);
+
+  const expandedTokens = expandedTerms
+    .flatMap((term) => normalizeSearchText(term).split(/\s+/))
+    .map(normalizeToken)
+    .filter(isMeaningfulToken);
+
+  const merged = [...new Set([...topicTokens, ...expandedTokens])];
+  if (merged.length > 0) return merged;
+
+  const normalizedTopic = normalizeSearchText(topic);
+  return normalizedTopic ? [normalizedTopic] : [];
+}
+
+function textMatchesTerms(text: string, terms: string[]): boolean {
+  if (terms.length === 0) return false;
+  const normalizedText = normalizeSearchText(text);
+  return terms.some((term) => normalizedText.includes(term));
+}
+
+interface FlattenedProfileFact {
+  path: string;
+  value: string;
+}
+
+function flattenProfileValue(
+  value: unknown,
+  path: string,
+  depth = 0,
+): FlattenedProfileFact[] {
+  if (value == null) return [];
+  if (depth > MAX_PROFILE_FACT_DEPTH) return [];
+
+  if (Array.isArray(value)) {
+    const flattened = value.flatMap((item, index) =>
+      flattenProfileValue(item, `${path}[${index}]`, depth + 1),
+    );
+    return flattened.length > 0 ? flattened : [{ path, value: '[]' }];
+  }
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    const flattened = entries.flatMap(([key, nested]) =>
+      flattenProfileValue(nested, `${path}.${key}`, depth + 1),
+    );
+    return flattened.length > 0 ? flattened : [{ path, value: '{}' }];
+  }
+
+  return [{ path, value: String(value) }];
+}
+
 // ── Pure Functions ─────────────────────────────────────────────────────
 
 /**
@@ -142,7 +228,7 @@ const QUANTITATIVE_PATTERNS = /\b(how\s+many|how\s+much|count|total|average|freq
  * Pattern-matches for intent type and expands terms via synonym map.
  */
 export function classifyIntent(topic: string): ClassifiedIntent {
-  const lower = topic.toLowerCase().trim();
+  const lower = normalizeSearchText(topic);
 
   if (!lower) {
     return { primary: 'general', expandedTerms: [], entityTypeHints: [], relationHints: [] };
@@ -150,19 +236,26 @@ export function classifyIntent(topic: string): ClassifiedIntent {
 
   // Determine primary intent (first match wins — order matters)
   let primary: IntentType = 'general';
-  if (TIMELINE_PATTERNS.test(lower)) primary = 'timeline';
+  if (TIMELINE_PATTERNS.test(lower) && !TIMELINE_EXCEPTION_PATTERNS.test(lower)) primary = 'timeline';
   else if (PREFERENCE_PATTERNS.test(lower)) primary = 'preference';
   else if (RELATIONSHIP_PATTERNS.test(lower)) primary = 'relationship';
   else if (QUANTITATIVE_PATTERNS.test(lower)) primary = 'quantitative';
-  else if (lower.split(/\s+/).length >= 2) primary = 'factual';
+  else if (lower.split(/\s+/).map(normalizeToken).filter(isMeaningfulToken).length >= 2) primary = 'factual';
 
   // Expand terms using synonym map
   const expandedTerms: string[] = [];
-  const words = lower.split(/\s+/);
+  const words = lower.split(/\s+/).map(normalizeToken).filter(isMeaningfulToken);
   for (const word of words) {
     for (const [key, synonyms] of Object.entries(SYNONYM_MAP)) {
-      if (word === key || synonyms.includes(word)) {
-        expandedTerms.push(key, ...synonyms.filter(s => s !== word && !words.includes(s)));
+      const normalizedSynonyms = synonyms.map(normalizeToken);
+      if (word === key || synonyms.includes(word) || normalizedSynonyms.includes(word)) {
+        expandedTerms.push(
+          key,
+          ...synonyms.filter((synonym) => {
+            const normalizedSynonym = normalizeToken(synonym);
+            return normalizedSynonym !== word && !words.includes(normalizedSynonym);
+          }),
+        );
         break;
       }
     }
@@ -206,9 +299,7 @@ export function scoreSourceRelevance(
   collectionsMeta: CollectionMetadata[],
   profile: Record<string, unknown> | null,
 ): ScoredSource[] {
-  const lower = topic.toLowerCase();
-  const terms = [lower, ...lower.split(/\s+/), ...intent.expandedTerms].filter(Boolean);
-  const uniqueTerms = [...new Set(terms)];
+  const uniqueTerms = buildSearchTerms(topic, intent.expandedTerms);
   const sources: ScoredSource[] = [];
 
   // Score tables
@@ -217,9 +308,10 @@ export function scoreSourceRelevance(
     let reason = 'default table source';
 
     const tableLower = table.tableName.toLowerCase();
+    const normalizedTableLower = normalizeToken(tableLower);
     const descLower = (table.description || '').toLowerCase();
 
-    if (uniqueTerms.some(t => tableLower === t)) {
+    if (uniqueTerms.some(t => tableLower === t || normalizedTableLower === t)) {
       score = Math.max(score, 0.9);
       reason = 'table name matches topic';
     } else if (uniqueTerms.some(t => tableLower.includes(t) || t.includes(tableLower))) {
@@ -242,9 +334,10 @@ export function scoreSourceRelevance(
     let reason = 'default vector source';
 
     const collLower = coll.collection.toLowerCase();
+    const normalizedCollectionLower = normalizeToken(collLower);
     const descLower = (coll.description || '').toLowerCase();
 
-    if (uniqueTerms.some(t => collLower === t)) {
+    if (uniqueTerms.some(t => collLower === t || normalizedCollectionLower === t)) {
       score = Math.max(score, 0.85);
       reason = 'collection name matches topic';
     } else if (uniqueTerms.some(t => collLower.includes(t) || t.includes(collLower))) {
@@ -559,8 +652,8 @@ async function retrieveFromTables(
   if (!hasConsent) return [];
 
   const facts: RetrievedFact[] = [];
-  const terms = [topic, ...intent.expandedTerms].filter(Boolean);
-  const searchTerm = escapeSQLString(escapeILIKE(terms[0] || topic));
+  const searchTerms = buildSearchTerms(topic, intent.expandedTerms).slice(0, 6);
+  const escapedSearchTerms = searchTerms.map((term) => escapeSQLString(escapeILIKE(term)));
 
   for (const tableName of selectedTables.slice(0, config.maxTables)) {
     try {
@@ -569,12 +662,18 @@ async function retrieveFromTables(
       const textCols = meta?.columns
         ?.filter(c => /text|varchar|char/i.test(c.type))
         .map(c => c.name) ?? [];
+      const normalizedTableName = normalizeToken(tableName.toLowerCase());
+      const tableContextMatch = searchTerms.some((term) =>
+        normalizedTableName === term ||
+        normalizedTableName.includes(term) ||
+        term.includes(normalizedTableName),
+      );
 
       let sql: string;
-      if (textCols.length > 0) {
+      if (textCols.length > 0 && escapedSearchTerms.length > 0) {
         // Build ILIKE conditions across text columns
-        const conditions = textCols
-          .map(col => `"${col}" ILIKE '%${searchTerm}%'`)
+        const conditions = escapedSearchTerms
+          .flatMap(searchTerm => textCols.map(col => `"${col}" ILIKE '%${searchTerm}%'`))
           .join(' OR ');
         sql = `SELECT * FROM "${tableName}" WHERE ${conditions} LIMIT ${config.maxRowsPerTable}`;
       } else {
@@ -582,7 +681,17 @@ async function retrieveFromTables(
         sql = `SELECT * FROM "${tableName}" ORDER BY created_at DESC LIMIT ${config.maxRowsPerTable}`;
       }
 
-      const result = await executeSandboxedQuery(userId, sql, 10, config.maxRowsPerTable);
+      let result = await executeSandboxedQuery(userId, sql, 10, config.maxRowsPerTable);
+      if (result.rows.length === 0 && textCols.length > 0 && tableContextMatch) {
+        // If the table itself strongly matches topic terms, return recent rows even
+        // when row text does not explicitly mention those terms (e.g., books table).
+        result = await executeSandboxedQuery(
+          userId,
+          `SELECT * FROM "${tableName}" ORDER BY created_at DESC LIMIT ${config.maxRowsPerTable}`,
+          10,
+          config.maxRowsPerTable,
+        );
+      }
 
       for (const row of result.rows) {
         const factParts: string[] = [];
@@ -617,36 +726,28 @@ function retrieveFromProfile(
   if (!profile) return [];
 
   const facts: RetrievedFact[] = [];
-  const lower = topic.toLowerCase();
-  const terms = [lower, ...lower.split(/\s+/), ...intent.expandedTerms].filter(Boolean);
-  const uniqueTerms = [...new Set(terms)];
+  const uniqueTerms = buildSearchTerms(topic, intent.expandedTerms);
 
   for (const [key, value] of Object.entries(profile)) {
-    const keyLower = key.toLowerCase();
-    const isMatch = uniqueTerms.some(t => keyLower.includes(t) || t.includes(keyLower));
+    const rootMatches = textMatchesTerms(key, uniqueTerms);
+    const flattened = flattenProfileValue(value, key);
 
-    if (isMatch) {
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        // One level deep for object values
-        for (const [subKey, subValue] of Object.entries(value as Record<string, unknown>)) {
-          if (subValue != null) {
-            facts.push({
-              fact: `${key}.${subKey}: ${String(subValue)}`,
-              sourceType: 'profile',
-              sourceRef: `profile/${key}/${subKey}`,
-              confidence: 0.9,
-            });
-          }
-        }
-      } else if (value != null) {
-        facts.push({
-          fact: `${key}: ${Array.isArray(value) ? value.join(', ') : String(value)}`,
-          sourceType: 'profile',
-          sourceRef: `profile/${key}`,
-          confidence: 0.9,
-        });
-      }
+    for (const entry of flattened) {
+      if (facts.length >= MAX_PROFILE_FACTS) break;
+      const entryMatches =
+        rootMatches ||
+        textMatchesTerms(entry.path, uniqueTerms);
+      if (!entryMatches) continue;
+
+      facts.push({
+        fact: `${entry.path}: ${entry.value}`,
+        sourceType: 'profile',
+        sourceRef: `profile/${entry.path.replace(/\./g, '/').replace(/\[/g, '/').replace(/]/g, '')}`,
+        confidence: 0.9,
+      });
     }
+
+    if (facts.length >= MAX_PROFILE_FACTS) break;
   }
 
   return facts;
@@ -685,7 +786,7 @@ export async function retrieveKnowledge(
     .map(s => s.sourceId);
 
   const selectedCollections = scoredSources
-    .filter(s => s.sourceType === 'vector')
+    .filter(s => s.sourceType === 'vector' && s.relevanceScore >= 0.3)
     .map(s => s.sourceId);
 
   const useGraph = scoredSources.some(s => s.sourceType === 'graph' && s.relevanceScore >= 0.3);

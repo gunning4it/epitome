@@ -24,6 +24,21 @@ describe('mcpAdapter', () => {
     ]);
     expect(adapted.isError).toBe(true);
   });
+
+  it('embeds meta in success payload when warnings are present', () => {
+    const result = toolSuccess(
+      { tables: ['meals'] },
+      'Found 1 table',
+      { warnings: ['No vectors read consent — collections section empty.'] },
+    );
+    const adapted = mcpAdapter(result);
+    const payload = JSON.parse(adapted.content[0].text);
+
+    expect(payload).toEqual({
+      tables: ['meals'],
+      _meta: { warnings: ['No vectors read consent — collections section empty.'] },
+    });
+  });
 });
 
 describe('chatgptAdapter', () => {
@@ -49,5 +64,20 @@ describe('chatgptAdapter', () => {
     ]);
     expect(adapted.isError).toBe(true);
     expect(adapted.structuredContent).toBeUndefined();
+  });
+
+  it('includes warnings in content and structuredContent meta', () => {
+    const result = toolSuccess(
+      { profile: { name: 'Bruce' } },
+      'User context retrieved successfully.',
+      { warnings: ['No graph read consent — topEntities section empty.'] },
+    );
+    const adapted = chatgptAdapter(result);
+
+    expect(adapted.content[0].text).toContain('Warnings: No graph read consent — topEntities section empty.');
+    expect(adapted.structuredContent).toEqual({
+      profile: { name: 'Bruce' },
+      _meta: { warnings: ['No graph read consent — topEntities section empty.'] },
+    });
   });
 });

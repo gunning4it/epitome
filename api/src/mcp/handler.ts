@@ -15,8 +15,8 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { z } from 'zod';
 import { getToolDefinitions, executeTool, McpContext } from './server.js';
 import { createMcpProtocolServer } from './protocol.js';
-import { rewriteLegacyJsonRpc, translateLegacyToolCall } from './legacyTranslator.js';
-import { isLegacyRestEndpointsEnabled, isLegacyToolTranslationEnabled } from './compat.js';
+import { rewriteLegacyJsonRpcWithEvents, translateLegacyToolCall } from './legacyTranslator.js';
+import { isLegacyRestEndpointsEnabled } from './compat.js';
 import { logger } from '@/utils/logger';
 import { recordApiCall, getEffectiveTier } from '@/services/metering.service';
 import { x402Service } from '@/services/x402.service';
@@ -102,7 +102,6 @@ function parseX402PaymentResponse(header: string): X402PaymentParsed & { raw: st
  */
 export function createMcpRoutes(): Hono<HonoEnv> {
   const app = new Hono<HonoEnv>();
-  const legacyToolTranslationEnabled = isLegacyToolTranslationEnabled();
   const legacyRestEnabled = isLegacyRestEndpointsEnabled();
 
   // ─── x402 conditional payment middleware ───────────────────
@@ -237,11 +236,20 @@ export function createMcpRoutes(): Hono<HonoEnv> {
       let parsedBody: unknown | undefined;
       if (c.req.method === 'POST') {
         const contentType = c.req.header('content-type');
-        if (legacyToolTranslationEnabled && contentType && contentType.includes('application/json')) {
+        if (contentType && contentType.includes('application/json')) {
           try {
             // Parse a clone so transport can still parse the original request body on its own.
             const body = await c.req.raw.clone().json();
-            parsedBody = rewriteLegacyJsonRpc(body);
+            const rewritten = rewriteLegacyJsonRpcWithEvents(body);
+            parsedBody = rewritten.body;
+            if (rewritten.rewrites.length > 0) {
+              logger.info('MCP legacy tool aliases normalized', {
+                route: '/mcp',
+                userId,
+                agentId,
+                rewrites: rewritten.rewrites,
+              });
+            }
           } catch {
             // Leave parsedBody undefined on parse errors; transport will return protocol-level errors.
           }
@@ -325,12 +333,15 @@ export function createMcpRoutes(): Hono<HonoEnv> {
         );
       }
 
-      if (legacyToolTranslationEnabled) {
-        const legacy = translateLegacyToolCall(toolName, args as Record<string, unknown>);
-        if (legacy) {
-          toolName = legacy.toolName;
-          args = legacy.args;
-        }
+      const legacy = translateLegacyToolCall(toolName, args as Record<string, unknown>);
+      if (legacy) {
+        logger.info('Legacy REST tool alias normalized', {
+          route: '/mcp/call/:toolName',
+          fromToolName: toolName,
+          toToolName: legacy.toolName,
+        });
+        toolName = legacy.toolName;
+        args = legacy.args;
       }
 
       const knownTools = getToolDefinitions().map((t) => t.name);

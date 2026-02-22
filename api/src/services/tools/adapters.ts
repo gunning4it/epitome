@@ -13,6 +13,21 @@ export interface ChatGptToolResponse {
   isError?: boolean;
 }
 
+function withMeta(result: ToolResult): Record<string, unknown> {
+  if (!result.success) return {};
+
+  const base =
+    result.data && typeof result.data === 'object' && !Array.isArray(result.data)
+      ? { ...(result.data as Record<string, unknown>) }
+      : { value: result.data };
+
+  if (!result.meta) return base;
+  return {
+    ...base,
+    _meta: result.meta,
+  };
+}
+
 /**
  * Legacy /mcp adapter.
  *
@@ -28,7 +43,7 @@ export function mcpAdapter(result: ToolResult): McpToolResponse {
     };
   }
   return {
-    content: [{ type: 'text', text: JSON.stringify(result.data) }],
+    content: [{ type: 'text', text: JSON.stringify(withMeta(result)) }],
   };
 }
 
@@ -44,8 +59,12 @@ export function chatgptAdapter(result: ToolResult): ChatGptToolResponse {
       isError: true,
     };
   }
+
+  const warnings = result.meta?.warnings ?? [];
+  const warningSuffix = warnings.length > 0 ? `\n\nWarnings: ${warnings.join(' | ')}` : '';
+
   return {
-    content: [{ type: 'text', text: result.message }],
-    structuredContent: result.data as Record<string, unknown>,
+    content: [{ type: 'text', text: `${result.message}${warningSuffix}` }],
+    structuredContent: withMeta(result),
   };
 }

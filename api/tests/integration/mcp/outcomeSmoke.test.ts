@@ -232,26 +232,39 @@ describe('Outcome smoke: life-memory UX expectations', () => {
     expect(topLevelShorthandPayload.table).toBe('books');
     expect(topLevelShorthandPayload.recordCount).toBeGreaterThanOrEqual(1);
 
-    const knowledgeResponse = await jsonRpc(
-      app,
-      'tools/call',
-      {
-        name: 'recall',
-        arguments: {
-          topic: "books I've read",
-          budget: 'medium',
+    const recallVariants = [
+      { topic: 'books read', headers: chatgptHeaders },
+      { topic: 'books I have read', headers: claudeHeaders },
+      { topic: 'books read / reading history', headers: chatgptHeaders },
+    ];
+
+    for (const variant of recallVariants) {
+      const knowledgeResponse = await jsonRpc(
+        app,
+        'tools/call',
+        {
+          name: 'recall',
+          arguments: {
+            topic: variant.topic,
+            budget: 'medium',
+          },
         },
-      },
-      chatgptHeaders,
-    );
-    expect(knowledgeResponse.status).toBe(200);
-    const knowledgePayload = parseToolResultPayload(await parseBody(knowledgeResponse));
-    expect(knowledgePayload.topic).toBe("books I've read");
-    expect(Array.isArray(knowledgePayload.facts)).toBe(true);
-    expect(knowledgePayload.coverageDetails).toBeDefined();
-    expect(typeof knowledgePayload.coverageDetails.score).toBe('number');
-    expect(Array.isArray(knowledgePayload.coverageDetails.plannedSources)).toBe(true);
-    expect(Array.isArray(knowledgePayload.coverageDetails.queriedSources)).toBe(true);
-    expect(Array.isArray(knowledgePayload.coverageDetails.missingSources)).toBe(true);
+        variant.headers,
+      );
+      expect(knowledgeResponse.status).toBe(200);
+      const knowledgePayload = parseToolResultPayload(await parseBody(knowledgeResponse));
+      expect(knowledgePayload.topic).toBe(variant.topic);
+      expect(Array.isArray(knowledgePayload.facts)).toBe(true);
+      expect(
+        knowledgePayload.facts.some((fact: { fact?: string }) =>
+          String(fact.fact || '').toLowerCase().includes('dune'),
+        ),
+      ).toBe(true);
+      expect(knowledgePayload.coverageDetails).toBeDefined();
+      expect(typeof knowledgePayload.coverageDetails.score).toBe('number');
+      expect(Array.isArray(knowledgePayload.coverageDetails.plannedSources)).toBe(true);
+      expect(Array.isArray(knowledgePayload.coverageDetails.queriedSources)).toBe(true);
+      expect(Array.isArray(knowledgePayload.coverageDetails.missingSources)).toBe(true);
+    }
   });
 });

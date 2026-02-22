@@ -181,6 +181,13 @@ describe('getUserContext service', () => {
     ]);
     expect(result.data.recentMemories).toHaveLength(1);
     expect(result.data.recentMemories[0].text).toBe('Had coffee today');
+    expect(result.data.access).toEqual({
+      profile: 'granted',
+      tables: 'granted',
+      vectors: 'granted',
+      graph: 'granted',
+      deniedSections: [],
+    });
     expect(result.meta?.warnings).toBeUndefined();
   });
 
@@ -199,6 +206,13 @@ describe('getUserContext service', () => {
     expect(result.data.collections).toEqual([]);
     expect(result.data.topEntities).toEqual([]);
     expect(result.data.recentMemories).toEqual([]);
+    expect(result.data.access).toEqual({
+      profile: 'denied',
+      tables: 'denied',
+      vectors: 'denied',
+      graph: 'denied',
+      deniedSections: ['profile', 'tables', 'vectors', 'graph'],
+    });
     expect(result.meta?.warnings).toContain('No profile read consent — all sections empty.');
   });
 
@@ -224,6 +238,8 @@ describe('getUserContext service', () => {
     expect(result.data.topEntities).toEqual([]);
     // recentMemories still populated (vectors consent is separate from graph)
     expect(result.data.recentMemories).toHaveLength(1);
+    expect(result.data.access.graph).toBe('denied');
+    expect(result.data.access.deniedSections).toContain('graph');
     expect(result.meta?.warnings).toEqual(
       expect.arrayContaining(['No graph read consent — topEntities section empty.']),
     );

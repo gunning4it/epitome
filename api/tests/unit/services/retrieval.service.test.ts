@@ -152,6 +152,15 @@ describe('retrieval.service', () => {
       );
     });
 
+    it('treats punctuation-heavy reading phrases as factual (not timeline)', () => {
+      const result = classifyIntent('books read / reading history');
+
+      expect(result.primary).toBe('factual');
+      expect(result.expandedTerms).toEqual(
+        expect.arrayContaining(['book', 'novel', 'author']),
+      );
+    });
+
     it('classifies empty string as general', () => {
       const result = classifyIntent('');
 
@@ -695,6 +704,62 @@ describe('retrieval.service', () => {
       expect(result.facts).toHaveLength(0);
       expect(typeof result.uncertaintyReason).toBe('string');
       expect(result.uncertaintyReason?.length).toBeGreaterThan(0);
+    });
+
+    it('avoids irrelevant profile facts for stopword-heavy book queries', async () => {
+      mockSearchAllVectors.mockResolvedValue([]);
+      mockGetEntityByName.mockResolvedValue([]);
+      mockTraverse.mockResolvedValue([]);
+      mockExecuteSandboxedQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      const consentChecker = makeConsentChecker(true);
+      const profile = {
+        date_of_birth: '1990-01-21',
+        family: {
+          children: [{ name: 'Ashley', age: '5 months' }],
+        },
+      };
+
+      const result = await retrieveKnowledge(
+        TEST_USER_ID,
+        'books I have read',
+        'medium',
+        consentChecker,
+        defaultTables,
+        defaultCollections,
+        profile,
+      );
+
+      expect(result.facts.some((fact) => fact.fact.includes('date_of_birth'))).toBe(false);
+      expect(result.facts.some((fact) => fact.fact.includes('family.children'))).toBe(false);
+    });
+
+    it('flattens nested profile objects without [object Object]', async () => {
+      mockSearchAllVectors.mockResolvedValue([]);
+      mockGetEntityByName.mockResolvedValue([]);
+      mockTraverse.mockResolvedValue([]);
+      mockExecuteSandboxedQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      const consentChecker = makeConsentChecker(true);
+      const profile = {
+        family: {
+          children: [{ name: 'Ashley', age: '5 months' }],
+        },
+      };
+
+      const result = await retrieveKnowledge(
+        TEST_USER_ID,
+        'family children',
+        'medium',
+        consentChecker,
+        defaultTables,
+        defaultCollections,
+        profile,
+      );
+
+      expect(result.facts.some((fact) => fact.fact.includes('family.children[0].name: Ashley'))).toBe(true);
+      expect(result.facts.some((fact) => fact.fact.includes('family.children[0].age: 5 months'))).toBe(true);
+      expect(result.facts.some((fact) => fact.fact.includes('[object Object]'))).toBe(false);
     });
 
     it('each fact has required sourceType and sourceRef fields', async () => {

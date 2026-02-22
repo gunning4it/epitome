@@ -80,6 +80,16 @@ interface RoutingHints {
   suggestedTools: string[];
 }
 
+type AccessStatus = 'granted' | 'denied';
+
+interface AccessDiagnostics {
+  profile: AccessStatus;
+  tables: AccessStatus;
+  vectors: AccessStatus;
+  graph: AccessStatus;
+  deniedSections: string[];
+}
+
 export interface GetUserContextData {
   profile: Record<string, unknown> | null;
   tables: TableSummary[];
@@ -87,6 +97,7 @@ export interface GetUserContextData {
   topEntities: TopEntity[];
   recentMemories: RecentMemory[];
   hints: RoutingHints;
+  access: AccessDiagnostics;
   retrievalPlan?: RetrievalPlan;
 }
 
@@ -118,12 +129,25 @@ export async function getUserContext(
   ctx: ToolContext,
 ): Promise<ToolResult<GetUserContextData>> {
   const { userId, agentId } = ctx;
+  const access: AccessDiagnostics = {
+    profile: 'granted',
+    tables: 'granted',
+    vectors: 'granted',
+    graph: 'granted',
+    deniedSections: [],
+  };
 
   // Top-level consent check — profile/read is the primary purpose.
   // If this fails, we still return success with empty sections (matches legacy behavior).
   try {
     await requireConsent(userId, agentId, 'profile', 'read');
   } catch {
+    access.profile = 'denied';
+    access.tables = 'denied';
+    access.vectors = 'denied';
+    access.graph = 'denied';
+    access.deniedSections = ['profile', 'tables', 'vectors', 'graph'];
+
     // No profile consent — return entirely empty but successful response
     return toolSuccess<GetUserContextData>(
       {
@@ -138,6 +162,7 @@ export async function getUserContext(
           hasGraphData: false,
           suggestedTools: ['memorize — no data yet, start by saving information the user shares'],
         },
+        access,
       },
       'User context retrieved (limited — no profile consent).',
       { warnings: ['No profile read consent — all sections empty.'] },
@@ -169,6 +194,7 @@ export async function getUserContext(
       recordCount: t.recordCount,
     }));
   } catch {
+    access.tables = 'denied';
     warnings.push('No tables read consent — tables section empty.');
   }
 
@@ -183,6 +209,7 @@ export async function getUserContext(
       entryCount: c.entryCount,
     }));
   } catch {
+    access.vectors = 'denied';
     warnings.push('No vectors read consent — collections section empty.');
   }
 
@@ -220,6 +247,7 @@ export async function getUserContext(
       }));
     });
   } catch {
+    access.graph = 'denied';
     warnings.push('No graph read consent — topEntities section empty.');
   }
 
@@ -254,8 +282,16 @@ export async function getUserContext(
       }));
     });
   } catch {
+    access.vectors = 'denied';
     warnings.push('No vectors read consent — recentMemories section empty.');
   }
+
+  access.deniedSections = [
+    access.profile === 'denied' ? 'profile' : null,
+    access.tables === 'denied' ? 'tables' : null,
+    access.vectors === 'denied' ? 'vectors' : null,
+    access.graph === 'denied' ? 'graph' : null,
+  ].filter((section): section is string => section !== null);
 
   const hints: RoutingHints = {
     hasStructuredData: tables.length > 0,
@@ -279,7 +315,7 @@ export async function getUserContext(
   }
 
   return toolSuccess<GetUserContextData>(
-    { profile, tables, collections, topEntities, recentMemories, hints, retrievalPlan },
+    { profile, tables, collections, topEntities, recentMemories, hints, access, retrievalPlan },
     'User context retrieved successfully.',
     warnings.length > 0 ? { warnings } : undefined,
   );

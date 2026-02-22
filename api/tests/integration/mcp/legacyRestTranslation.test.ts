@@ -24,7 +24,6 @@ describe('MCP legacy REST endpoints (/mcp/call/:toolName)', () => {
 
   beforeEach(async () => {
     delete process.env.MCP_ENABLE_LEGACY_REST_ENDPOINTS;
-    delete process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION;
     testUser = await createTestUser();
     headers = createTestAuthHeaders(testUser, 'test-rest-agent');
 
@@ -42,7 +41,6 @@ describe('MCP legacy REST endpoints (/mcp/call/:toolName)', () => {
 
   afterEach(async () => {
     delete process.env.MCP_ENABLE_LEGACY_REST_ENDPOINTS;
-    delete process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION;
     await cleanupTestUser(testUser.userId);
   });
 
@@ -75,9 +73,8 @@ describe('MCP legacy REST endpoints (/mcp/call/:toolName)', () => {
     expect(body.result).toHaveProperty('facts');
   });
 
-  it('compat mode: can translate legacy names only with translation flag', async () => {
+  it('compat mode: translates legacy names on call path', async () => {
     process.env.MCP_ENABLE_LEGACY_REST_ENDPOINTS = 'true';
-    process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION = 'true';
     const app = buildTestApp();
 
     const addResponse = await app.request('/mcp/call/add_record', {
@@ -106,5 +103,22 @@ describe('MCP legacy REST endpoints (/mcp/call/:toolName)', () => {
     expect(queryBody.success).toBe(true);
     expect(queryBody.result.table).toBe('books');
     expect(Array.isArray(queryBody.result.records)).toBe(true);
+  });
+
+  it('compat mode: translates get_user_context with topic phrase', async () => {
+    process.env.MCP_ENABLE_LEGACY_REST_ENDPOINTS = 'true';
+    const app = buildTestApp();
+
+    const response = await app.request('/mcp/call/get_user_context', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ topic: 'books read / reading history' }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.success).toBe(true);
+    expect(body.result).toHaveProperty('topic', 'books read / reading history');
+    expect(Array.isArray(body.result.facts)).toBe(true);
   });
 });
