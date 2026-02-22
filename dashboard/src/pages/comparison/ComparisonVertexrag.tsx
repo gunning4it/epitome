@@ -93,7 +93,7 @@ export default function ComparisonVertexrag() {
               to="/comparison/mem0"
               className="group inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
-              Epitome vs Mem0
+              Epitome vs Mem0 vs Supermemory
               <ArrowRight className="size-3.5 group-hover:translate-x-0.5 transition-transform" />
             </Link>
             <span className="hidden sm:inline text-border">|</span>
@@ -101,7 +101,7 @@ export default function ComparisonVertexrag() {
               to="/comparison/supermemory"
               className="group inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
-              Epitome vs Supermemory
+              Epitome vs Supermemory vs Vertex AI RAG
               <ArrowRight className="size-3.5 group-hover:translate-x-0.5 transition-transform" />
             </Link>
           </div>

@@ -83,14 +83,18 @@ export default function ComparisonMatrix({ columns, categories }: ComparisonMatr
                 </tr>
               </thead>
               <tbody>
-                {categories.map((category) => (
+                {categories.map((category, catIdx) => (
                   <Fragment key={category.name}>
                     {/* Category header row */}
                     <tr>
-                      <td colSpan={columns.length + 1} className="px-4">
+                      <td
+                        colSpan={columns.length + 1}
+                        className={catIdx === 0 ? 'px-4 pt-2' : 'px-4 pt-6'}
+                      >
                         <ComparisonCategoryHeader
                           name={category.name}
                           icon={category.icon}
+                          compact
                         />
                       </td>
                     </tr>

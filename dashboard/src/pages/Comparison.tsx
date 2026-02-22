@@ -70,6 +70,7 @@ export default function Comparison() {
               <CompetitorCard
                 key={page.slug}
                 competitor={COMPETITORS[page.primary]}
+                secondary={COMPETITORS[page.secondary]}
                 slug={page.slug}
               />
             ))}

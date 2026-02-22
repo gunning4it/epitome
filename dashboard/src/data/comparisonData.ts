@@ -424,13 +424,13 @@ export const COMPARISON_PAGES: ComparisonPageMeta[] = [
     primary: 'mem0',
     secondary: 'supermemory',
     superlabel: 'Memory Platform Showdown',
-    title: 'Epitome vs Mem0',
+    title: 'Epitome vs Mem0 vs Supermemory',
     subtitle:
-      'Open-source knowledge graph with confidence scoring versus managed memory SaaS. See how schema isolation, MCP tools, and consent systems stack up.',
+      'Three-way comparison of open-source knowledge graph, managed memory SaaS, and bookmark-based memory. Schema isolation, MCP tools, consent systems, and pricing side by side.',
     seo: {
-      title: 'Epitome vs Mem0 \u2014 AI Memory Platform Comparison 2026',
+      title: 'Epitome vs Mem0 vs Supermemory \u2014 AI Memory Platform Comparison 2026',
       description:
-        'Epitome vs Mem0 vs Supermemory compared. Self-hosted knowledge graph vs managed memory SaaS. Schema isolation, MCP tools, consent system, and pricing analyzed side by side.',
+        'Epitome vs Mem0 vs Supermemory compared side by side. Self-hosted knowledge graph vs managed memory SaaS vs bookmark memory. Schema isolation, MCP tools, consent system, and pricing analyzed.',
     },
   },
   {
@@ -438,13 +438,13 @@ export const COMPARISON_PAGES: ComparisonPageMeta[] = [
     primary: 'supermemory',
     secondary: 'vertexrag',
     superlabel: 'Personal Memory Face-Off',
-    title: 'Epitome vs Supermemory',
+    title: 'Epitome vs Supermemory vs Vertex AI RAG',
     subtitle:
-      'Structured identity layer versus bookmark memory versus enterprise RAG. Compare architecture, agent support, and self-hosting options.',
+      'Three-way comparison of structured identity layer, bookmark memory, and enterprise RAG. Architecture, agent support, self-hosting, and pricing side by side.',
     seo: {
-      title: 'Epitome vs Supermemory \u2014 Personal AI Memory Compared 2026',
+      title: 'Epitome vs Supermemory vs Vertex AI RAG \u2014 Personal AI Memory Compared 2026',
       description:
-        'Epitome vs Supermemory vs Vertex AI RAG compared. Structured identity layer vs bookmark memory vs enterprise RAG. Architecture, agent support, and self-hosting compared.',
+        'Epitome vs Supermemory vs Vertex AI RAG compared side by side. Structured identity layer vs bookmark memory vs enterprise RAG. Architecture, agent support, and self-hosting analyzed.',
     },
   },
   {
@@ -452,13 +452,13 @@ export const COMPARISON_PAGES: ComparisonPageMeta[] = [
     primary: 'vertexrag',
     secondary: 'mem0',
     superlabel: 'Memory Vault vs Enterprise RAG',
-    title: 'Epitome vs Vertex AI RAG',
+    title: 'Epitome vs Vertex AI RAG vs Mem0',
     subtitle:
-      'Personal memory vault with confidence scoring versus enterprise document retrieval. Analyze privacy, cost, and vendor independence.',
+      'Three-way comparison of personal memory vault, enterprise document retrieval, and managed memory SaaS. Privacy, cost, vendor independence, and architecture side by side.',
     seo: {
-      title: 'Epitome vs Vertex AI RAG \u2014 Memory Vault vs Enterprise RAG 2026',
+      title: 'Epitome vs Vertex AI RAG vs Mem0 \u2014 Memory Vault vs Enterprise RAG 2026',
       description:
-        'Epitome vs Vertex AI RAG vs Mem0 compared. Personal memory vault with confidence scoring vs enterprise document retrieval. Privacy, cost, and vendor independence analyzed.',
+        'Epitome vs Vertex AI RAG vs Mem0 compared side by side. Personal memory vault with confidence scoring vs enterprise document retrieval vs managed SaaS. Privacy, cost, and vendor independence analyzed.',
     },
   },
 ];

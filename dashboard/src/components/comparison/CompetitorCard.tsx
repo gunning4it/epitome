@@ -7,6 +7,7 @@ import type { CompetitorInfo } from '@/data/comparisonData';
 
 interface CompetitorCardProps {
   competitor: CompetitorInfo;
+  secondary: CompetitorInfo;
   slug: string;
 }
 
@@ -19,13 +20,13 @@ const cardVariants = {
   },
 };
 
-export default function CompetitorCard({ competitor, slug }: CompetitorCardProps) {
+export default function CompetitorCard({ competitor, secondary, slug }: CompetitorCardProps) {
   return (
     <motion.div variants={cardVariants}>
       <Card className="group h-full card-glow border-border/50 hover:border-border transition-colors">
         <CardContent className="pt-6 flex flex-col h-full">
           <h3 className="text-lg font-semibold tracking-tight mb-1">
-            Epitome vs {competitor.name}
+            Epitome vs {competitor.name} vs {secondary.name}
           </h3>
           <p className="text-sm text-muted-foreground mb-4">
             {competitor.tagline}

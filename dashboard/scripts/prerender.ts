@@ -106,16 +106,16 @@ const ROUTE_META: Record<string, { title: string; description: string }> = {
     description: 'See how Epitome\u2019s open-source AI memory vault compares to Mem0, Supermemory, and Vertex AI RAG. Feature-by-feature comparison of memory architecture, knowledge graph, privacy, and pricing.',
   },
   '/comparison/mem0': {
-    title: 'Epitome vs Mem0 — AI Memory Platform Comparison 2026',
-    description: 'Epitome vs Mem0 vs Supermemory compared. Self-hosted knowledge graph vs managed memory SaaS. Schema isolation, MCP tools, consent system, and pricing analyzed side by side.',
+    title: 'Epitome vs Mem0 vs Supermemory — AI Memory Platform Comparison 2026',
+    description: 'Epitome vs Mem0 vs Supermemory compared side by side. Self-hosted knowledge graph vs managed memory SaaS vs bookmark memory. Schema isolation, MCP tools, consent system, and pricing analyzed.',
   },
   '/comparison/supermemory': {
-    title: 'Epitome vs Supermemory — Personal AI Memory Compared 2026',
-    description: 'Epitome vs Supermemory vs Vertex AI RAG compared. Structured identity layer vs bookmark memory vs enterprise RAG. Architecture, agent support, and self-hosting compared.',
+    title: 'Epitome vs Supermemory vs Vertex AI RAG — Personal AI Memory Compared 2026',
+    description: 'Epitome vs Supermemory vs Vertex AI RAG compared side by side. Structured identity layer vs bookmark memory vs enterprise RAG. Architecture, agent support, and self-hosting analyzed.',
   },
   '/comparison/vertexrag': {
-    title: 'Epitome vs Vertex AI RAG — Memory Vault vs Enterprise RAG 2026',
-    description: 'Epitome vs Vertex AI RAG vs Mem0 compared. Personal memory vault with confidence scoring vs enterprise document retrieval. Privacy, cost, and vendor independence analyzed.',
+    title: 'Epitome vs Vertex AI RAG vs Mem0 — Memory Vault vs Enterprise RAG 2026',
+    description: 'Epitome vs Vertex AI RAG vs Mem0 compared side by side. Personal memory vault with confidence scoring vs enterprise document retrieval vs managed SaaS. Privacy, cost, and vendor independence analyzed.',
   },
 };
 
