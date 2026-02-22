@@ -17,6 +17,7 @@ import * as tools from '@/services/tools/index.js';
 import { chatgptAdapter } from '@/services/tools/adapters.js';
 import { buildToolContext } from '@/services/tools/context.js';
 import { TOOL_ANNOTATIONS } from './annotations.js';
+import { isCanonicalMcpToolName } from '@/mcp/toolsContract.js';
 
 /**
  * Extract ToolContext from MCP authInfo extra.
@@ -42,6 +43,12 @@ function wrapTool<T>(
     return chatgptAdapter(result);
   };
 }
+
+const SERVICE_MAP = {
+  recall: wrapTool(tools.recall),
+  memorize: wrapTool(tools.memorize),
+  review: wrapTool(tools.review),
+};
 
 /**
  * Create a ChatGPT Apps MCP server with 3 facade tools.
@@ -78,17 +85,25 @@ export function createChatGptMcpServer(): McpServer {
           }),
         ]).optional().describe('For pattern: natural language or structured criteria'),
       }).optional().describe('For mode "graph": graph query options'),
-      table: z.object({
-        table: z.string().optional().describe('Table name'),
-        tableName: z.string().optional().describe('Deprecated alias for "table"'),
-        filters: z.record(z.string(), z.unknown()).optional().describe('Structured filters'),
-        sql: z.string().optional().describe('SQL SELECT query (read-only, sandboxed)'),
-        limit: z.number().optional().describe('Max results (default 50, max 1000)'),
-        offset: z.number().optional().describe('Pagination offset'),
-      }).optional().describe('For mode "table": table query options'),
+      table: z.union([
+        z.string().min(1),
+        z.object({
+          table: z.string().optional().describe('Table name'),
+          tableName: z.string().optional().describe('Deprecated alias for "table"'),
+          filters: z.record(z.string(), z.unknown()).optional().describe('Structured filters'),
+          sql: z.string().optional().describe('SQL SELECT query (read-only, sandboxed)'),
+          limit: z.number().optional().describe('Max results (default 50, max 1000)'),
+          offset: z.number().optional().describe('Pagination offset'),
+        }),
+      ]).optional().describe('For mode "table": table name string or query options object'),
+      tableName: z.string().optional().describe('Top-level table shorthand (normalized into table mode query)'),
+      filters: z.record(z.string(), z.unknown()).optional().describe('Top-level filters shorthand for table mode'),
+      sql: z.string().optional().describe('Top-level SQL shorthand for table mode'),
+      limit: z.number().optional().describe('Top-level limit shorthand for table mode'),
+      offset: z.number().optional().describe('Top-level offset shorthand for table mode'),
     },
     annotations: TOOL_ANNOTATIONS.recall,
-  }, wrapTool(tools.recall));
+  }, SERVICE_MAP.recall);
 
   server.registerTool('memorize', {
     description:
@@ -103,7 +118,7 @@ export function createChatGptMcpServer(): McpServer {
       metadata: z.record(z.string(), z.unknown()).optional().describe('For storage "memory": optional metadata. Defaults to data.'),
     },
     annotations: TOOL_ANNOTATIONS.memorize,
-  }, wrapTool(tools.memorize));
+  }, SERVICE_MAP.memorize);
 
   server.registerTool('review', {
     description:
@@ -114,7 +129,14 @@ export function createChatGptMcpServer(): McpServer {
       resolution: z.enum(['confirm', 'reject', 'keep_both']).optional().describe('For resolve: how to handle the contradiction'),
     },
     annotations: TOOL_ANNOTATIONS.review,
-  }, wrapTool(tools.review));
+  }, SERVICE_MAP.review);
+
+  // Defensive assertion to keep this server aligned with canonical MCP tools.
+  for (const name of Object.keys(SERVICE_MAP)) {
+    if (!isCanonicalMcpToolName(name)) {
+      throw new Error(`Invalid MCP tool registration: ${name}`);
+    }
+  }
 
   return server;
 }

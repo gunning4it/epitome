@@ -14,7 +14,7 @@
  * so the LLM can immediately prompt the user to resolve.
  */
 
-import { requireConsent } from '@/services/consent.service';
+import { requireConsent, requireDomainConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
 import { searchAllVectors, deleteVector } from '@/services/vector.service';
 import { getContradictions } from '@/mcp/serviceWrappers.js';
@@ -57,7 +57,7 @@ export async function memorize(
   // ── Delete path ──────────────────────────────────────────────────────
   if (action === 'delete') {
     try {
-      await requireConsent(userId, agentId, 'vectors', 'write');
+      await requireDomainConsent(userId, agentId, 'vectors', 'write');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.startsWith('CONSENT_DENIED')) {

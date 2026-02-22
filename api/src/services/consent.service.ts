@@ -394,3 +394,51 @@ export async function requireConsent(
     );
   }
 }
+
+export type ConsentDomain = 'profile' | 'tables' | 'vectors' | 'graph' | 'memory';
+
+const DOMAIN_RESOURCES: Record<ConsentDomain, string[]> = {
+  profile: ['profile'],
+  tables: ['tables', 'tables/*'],
+  vectors: ['vectors', 'vectors/*'],
+  graph: ['graph', 'graph/*'],
+  memory: ['memory'],
+};
+
+/**
+ * Domain-level consent check that treats root + wildcard resources as equivalent
+ * for the same domain (e.g. tables and tables/*).
+ */
+export async function checkDomainConsent(
+  userId: string,
+  agentId: string,
+  domain: ConsentDomain,
+  permission: Permission
+): Promise<boolean> {
+  const resources = DOMAIN_RESOURCES[domain];
+  for (const resource of resources) {
+    if (await checkConsent(userId, agentId, resource, permission)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Require domain-level consent. Accepts either root or wildcard grant
+ * for domains that support wildcards.
+ */
+export async function requireDomainConsent(
+  userId: string,
+  agentId: string,
+  domain: ConsentDomain,
+  permission: Permission
+): Promise<void> {
+  const hasPermission = await checkDomainConsent(userId, agentId, domain, permission);
+  if (!hasPermission) {
+    const acceptable = DOMAIN_RESOURCES[domain].join(' or ');
+    throw new Error(
+      `CONSENT_DENIED: Agent '${agentId}' does not have ${permission} access to ${domain} (${acceptable})`,
+    );
+  }
+}

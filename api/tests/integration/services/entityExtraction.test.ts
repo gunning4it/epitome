@@ -318,6 +318,40 @@ describe('extractEntitiesRuleBased', () => {
     });
   });
 
+  it('should extract person entities from profile family object arrays', () => {
+    const record = {
+      id: 1,
+      family: {
+        children: [
+          {
+            name: 'Ashley Gunning',
+            age: '5 months',
+            birthday: '2026-08-31',
+          },
+        ],
+      },
+    };
+
+    const entities = extractEntitiesRuleBased('profile', record);
+    const ashley = entities.find(
+      (entity) => entity.type === 'person' && entity.name === 'Ashley Gunning',
+    );
+
+    expect(ashley).toBeDefined();
+    expect(ashley).toMatchObject({
+      name: 'Ashley Gunning',
+      type: 'person',
+      properties: {
+        relation: 'child',
+        age: '5 months',
+        birthday: '2026-08-31',
+      },
+      edge: {
+        relation: 'family_member',
+      },
+    });
+  });
+
   it('should extract preferences from profile', () => {
     const record = {
       id: 1,

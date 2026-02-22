@@ -102,9 +102,22 @@ describe('Graph API Integration Tests', () => {
   });
 
   describe('GET /v1/graph/entities', () => {
-    it('should return all entities', async () => {
+    it('should return connected entities by default', async () => {
       const headers = createTestAuthHeaders(testUser);
       const response = await app.request('/v1/graph/entities', {
+        method: 'GET',
+        headers,
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.entities).toBeInstanceOf(Array);
+      expect(data.entities.length).toBe(3); // Alice, Bob, Charlie (David is disconnected)
+    });
+
+    it('should include disconnected entities when explicitly requested', async () => {
+      const headers = createTestAuthHeaders(testUser);
+      const response = await app.request('/v1/graph/entities?includeDisconnected=true', {
         method: 'GET',
         headers,
       });
@@ -130,7 +143,7 @@ describe('Graph API Integration Tests', () => {
 
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(data.entities.length).toBe(4); // Alice, Bob, Charlie, David (all persons)
+      expect(data.entities.length).toBe(3); // Alice, Bob, Charlie (connected persons only)
       expect(data.entities.every((e: any) => e.type === 'person')).toBe(true);
     });
 
@@ -216,7 +229,7 @@ describe('Graph API Integration Tests', () => {
         WHERE id = '${bobId}'
       `));
 
-      const response = await app.request('/v1/graph/entities', {
+      const response = await app.request('/v1/graph/entities?includeDisconnected=true', {
         method: "GET",
         headers: createTestAuthHeaders(testUser),
       });

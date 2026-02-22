@@ -7,7 +7,7 @@
  * Pattern: consent → audit → load metadata → delegate → return ToolResult
  */
 
-import { requireConsent, checkConsent } from '@/services/consent.service';
+import { requireConsent, checkConsent, checkDomainConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
 import { listTables } from '@/services/table.service';
 import { listCollections } from '@/services/vector.service';
@@ -48,7 +48,7 @@ export async function retrieveUserKnowledge(
   // Audit
   await logAuditEntry(userId, {
     agentId,
-    action: 'mcp_retrieve_user_knowledge',
+    action: 'mcp_recall',
     resource: 'profile',
     details: { topic, budget },
   });
@@ -91,7 +91,11 @@ export async function retrieveUserKnowledge(
 
   // Build consent checker callback
   const consentChecker = async (resource: string, permission: string): Promise<boolean> => {
-    return checkConsent(userId, agentId, resource, permission as 'read' | 'write');
+    const typedPermission = permission as 'read' | 'write';
+    if (resource === 'tables' || resource === 'vectors' || resource === 'graph') {
+      return checkDomainConsent(userId, agentId, resource, typedPermission);
+    }
+    return checkConsent(userId, agentId, resource, typedPermission);
   };
 
   // Execute retrieval

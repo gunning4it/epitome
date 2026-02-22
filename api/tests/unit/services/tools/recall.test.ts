@@ -291,6 +291,34 @@ describe('recall facade service', () => {
     expect(queryTable).toHaveBeenCalledWith(tableArgs, mockContext);
   });
 
+  it('mode:table accepts table string shorthand and delegates to queryTable', async () => {
+    const mockResult = {
+      success: true as const,
+      data: { records: [] },
+      message: 'ok',
+    };
+    vi.mocked(queryTable).mockResolvedValue(mockResult);
+
+    const result = await recall({ mode: 'table', table: 'books' as any }, mockContext);
+
+    expect(result).toBe(mockResult);
+    expect(queryTable).toHaveBeenCalledWith({ table: 'books' }, mockContext);
+  });
+
+  it('mode:table accepts top-level tableName shorthand and delegates to queryTable', async () => {
+    const mockResult = {
+      success: true as const,
+      data: { records: [] },
+      message: 'ok',
+    };
+    vi.mocked(queryTable).mockResolvedValue(mockResult);
+
+    const result = await recall({ mode: 'table', tableName: 'books' } as any, mockContext);
+
+    expect(result).toBe(mockResult);
+    expect(queryTable).toHaveBeenCalledWith({ table: 'books' }, mockContext);
+  });
+
   it('mode:table without table object delegates to listTables', async () => {
     const mockResult = {
       success: true as const,

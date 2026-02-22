@@ -12,7 +12,7 @@
  * data instead of failing the entire request.
  */
 
-import { requireConsent } from '@/services/consent.service';
+import { requireConsent, requireDomainConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
 import { getLatestProfile } from '@/services/profile.service';
 import { listTables } from '@/services/table.service';
@@ -161,7 +161,7 @@ export async function getUserContext(
   // Tables — only if agent has tables consent
   let tables: TableSummary[] = [];
   try {
-    await requireConsent(userId, agentId, 'tables', 'read');
+    await requireDomainConsent(userId, agentId, 'tables', 'read');
     const raw = await listTables(userId);
     tables = raw.map((t) => ({
       name: t.tableName,
@@ -175,7 +175,7 @@ export async function getUserContext(
   // Vector collections — only if agent has vectors consent
   let collections: CollectionSummary[] = [];
   try {
-    await requireConsent(userId, agentId, 'vectors', 'read');
+    await requireDomainConsent(userId, agentId, 'vectors', 'read');
     const raw = await listCollections(userId);
     collections = raw.map((c) => ({
       name: c.collection,
@@ -226,7 +226,7 @@ export async function getUserContext(
   // Recent memories/vectors — only if agent has vectors consent
   let recentMemories: RecentMemory[] = [];
   try {
-    await requireConsent(userId, agentId, 'vectors', 'read');
+    await requireDomainConsent(userId, agentId, 'vectors', 'read');
     recentMemories = await withUserSchema(userId, async (tx) => {
       const result = await tx.unsafe(`
         SELECT

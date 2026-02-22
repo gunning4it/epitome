@@ -5,7 +5,7 @@
  * Ranked by composite score: relevance × confidence × recency × frequency
  */
 
-import { requireConsent } from '@/services/consent.service';
+import { requireConsent, requireDomainConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
 import { getLatestProfile } from '@/services/profile.service';
 import { listTables } from '@/services/table.service';
@@ -65,7 +65,7 @@ export async function getUserContext(args: GetUserContextArgs, context: McpConte
   // Tables — only if agent has tables consent
   let tables: Awaited<ReturnType<typeof listTables>> = [];
   try {
-    await requireConsent(userId, agentId, 'tables', 'read');
+    await requireDomainConsent(userId, agentId, 'tables', 'read');
     tables = await listTables(userId);
   } catch (error) {
     logger.warn('getUserContext: section failed', {
@@ -77,7 +77,7 @@ export async function getUserContext(args: GetUserContextArgs, context: McpConte
   // Vector collections — only if agent has vectors consent
   let collections: Awaited<ReturnType<typeof listCollections>> = [];
   try {
-    await requireConsent(userId, agentId, 'vectors', 'read');
+    await requireDomainConsent(userId, agentId, 'vectors', 'read');
     collections = await listCollections(userId);
   } catch (error) {
     logger.warn('getUserContext: section failed', {
@@ -129,7 +129,7 @@ export async function getUserContext(args: GetUserContextArgs, context: McpConte
   // Recent memories/vectors — only if agent has vectors consent
   let recentMemories: Array<{ collection: string; text: string; metadata: Record<string, unknown>; confidence: number | null; status: string | null; createdAt: Date }> = [];
   try {
-    await requireConsent(userId, agentId, 'vectors', 'read');
+    await requireDomainConsent(userId, agentId, 'vectors', 'read');
     recentMemories = await withUserSchema(userId, async (tx) => {
       const result = await tx.unsafe(`
         SELECT

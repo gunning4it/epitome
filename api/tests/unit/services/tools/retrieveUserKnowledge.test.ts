@@ -8,6 +8,7 @@ import type { ToolContext } from '@/services/tools/types';
 vi.mock('@/services/consent.service', () => ({
   requireConsent: vi.fn(),
   checkConsent: vi.fn(),
+  checkDomainConsent: vi.fn(),
 }));
 
 vi.mock('@/services/audit.service', () => ({
@@ -31,7 +32,7 @@ vi.mock('@/services/retrieval.service', () => ({
 }));
 
 import { retrieveUserKnowledge } from '@/services/tools/retrieveUserKnowledge';
-import { requireConsent, checkConsent } from '@/services/consent.service';
+import { requireConsent, checkConsent, checkDomainConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
 import { listTables } from '@/services/table.service';
 import { listCollections } from '@/services/vector.service';
@@ -82,8 +83,14 @@ const mockRetrievalResult = {
   intent: { primary: 'general', expandedTerms: [], entityTypeHints: [], relationHints: [] },
   budget: 'medium' as const,
   facts: [{ fact: 'User likes sushi', sourceType: 'vector', sourceRef: 'vectors/general#1', confidence: 0.85 }],
-  sourcesQueried: ['vectors', 'graph'],
+  sourcesQueried: ['vector', 'graph'],
   coverage: 0.5,
+  coverageDetails: {
+    score: 0.5,
+    plannedSources: ['vector', 'graph'],
+    queriedSources: ['vector', 'graph'],
+    missingSources: [],
+  },
   warnings: [] as string[],
   timingMs: 150,
 };
@@ -93,6 +100,7 @@ const mockRetrievalResult = {
 function consentAllowed() {
   (requireConsent as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
   (checkConsent as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+  (checkDomainConsent as ReturnType<typeof vi.fn>).mockResolvedValue(true);
 }
 
 function consentDeniedProfile() {
@@ -133,7 +141,7 @@ describe('retrieveUserKnowledge service', () => {
     expect(result.data.facts).toHaveLength(1);
     expect(result.data.facts[0].fact).toBe('User likes sushi');
     expect(result.data.facts[0].confidence).toBe(0.85);
-    expect(result.data.sourcesQueried).toEqual(['vectors', 'graph']);
+    expect(result.data.sourcesQueried).toEqual(['vector', 'graph']);
     expect(result.data.coverage).toBe(0.5);
     expect(result.data.timingMs).toBe(150);
     expect(result.message).toBe('Retrieved 1 facts about "sushi"');
@@ -199,7 +207,7 @@ describe('retrieveUserKnowledge service', () => {
 
     expect(logAuditEntry).toHaveBeenCalledWith('user-123', {
       agentId: 'test-agent',
-      action: 'mcp_retrieve_user_knowledge',
+      action: 'mcp_recall',
       resource: 'profile',
       details: { topic: 'sushi', budget: 'small' },
     });
@@ -409,7 +417,7 @@ describe('retrieveUserKnowledge service', () => {
     );
   });
 
-  it('passes a consent checker function that delegates to checkConsent', async () => {
+  it('passes a consent checker function that handles domain scopes consistently', async () => {
     consentAllowed();
     setupFullMocks();
 
@@ -419,10 +427,14 @@ describe('retrieveUserKnowledge service', () => {
     const call = (retrieveKnowledge as ReturnType<typeof vi.fn>).mock.calls[0];
     const consentChecker = call[3]; // 4th argument
 
-    // Call the consent checker to verify it delegates to checkConsent
+    // Domain scopes should delegate to checkDomainConsent
     await consentChecker('vectors', 'read');
+    expect(checkDomainConsent).toHaveBeenCalledWith('user-123', 'test-agent', 'vectors', 'read');
 
-    expect(checkConsent).toHaveBeenCalledWith('user-123', 'test-agent', 'vectors', 'read');
+    // Non-domain scopes should still use checkConsent
+    await consentChecker('profile', 'read');
+    expect(checkConsent).not.toHaveBeenCalledWith('user-123', 'test-agent', 'vectors', 'read');
+    expect(checkConsent).toHaveBeenCalledWith('user-123', 'test-agent', 'profile', 'read');
   });
 
   it('re-throws non-consent errors from requireConsent', async () => {

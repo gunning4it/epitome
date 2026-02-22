@@ -6,6 +6,20 @@
 
 BASE_URL="http://localhost:3000"
 API_KEY="${EPITOME_API_KEY:-epi_test_key_replace_me}"
+COMMON_HEADERS=(
+  -H "Authorization: Bearer ${API_KEY}"
+  -H "X-Agent-ID: test-script"
+  -H "Accept: application/json, text/event-stream"
+  -H "Content-Type: application/json"
+)
+
+rpc() {
+  local method="$1"
+  local params="$2"
+  curl -s -X POST "${BASE_URL}/mcp" \
+    "${COMMON_HEADERS[@]}" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"${method}\",\"params\":${params}}"
+}
 
 echo "🧪 Testing Epitome MCP Server"
 echo "=============================="
@@ -13,7 +27,7 @@ echo ""
 
 # Test 1: List tools
 echo "✓ Test 1: List available tools"
-curl -s "${BASE_URL}/mcp/tools" | jq -r '.tools[] | .name' | head -3
+rpc "tools/list" "{}" | jq -r '.result.tools[]?.name' | head -3
 echo ""
 
 # Test 2: OAuth discovery
@@ -23,42 +37,26 @@ echo ""
 
 # Test 3: recall (requires API key)
 echo "✓ Test 3: recall (no topic = user context)"
-curl -s -X POST "${BASE_URL}/mcp/call/recall" \
-  -H "Authorization: Bearer ${API_KEY}" \
-  -H "X-Agent-ID: test-script" \
-  -H "Content-Type: application/json" \
-  -d '{}' | jq -r '.success // .error.code'
+rpc "tools/call" '{"name":"recall","arguments":{}}' | jq -r 'if .error then .error.message else "ok" end'
 echo ""
 
 # Test 4: recall with topic
 echo "✓ Test 4: recall (with topic)"
-curl -s -X POST "${BASE_URL}/mcp/call/recall" \
-  -H "Authorization: Bearer ${API_KEY}" \
-  -H "X-Agent-ID: test-script" \
-  -H "Content-Type: application/json" \
-  -d '{"topic": "food"}' | jq -r '.success // .error.code'
+rpc "tools/call" '{"name":"recall","arguments":{"topic":"food"}}' | jq -r 'if .error then .error.message else "ok" end'
 echo ""
 
 # Test 5: memorize
 echo "✓ Test 5: memorize"
-curl -s -X POST "${BASE_URL}/mcp/call/memorize" \
-  -H "Authorization: Bearer ${API_KEY}" \
-  -H "X-Agent-ID: test-script" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Test memory from script", "category": "test"}' | jq -r '.success // .error.code'
+rpc "tools/call" '{"name":"memorize","arguments":{"text":"Test memory from script","category":"test"}}' | jq -r 'if .error then .error.message else "ok" end'
 echo ""
 
 # Test 6: review
 echo "✓ Test 6: review"
-curl -s -X POST "${BASE_URL}/mcp/call/review" \
-  -H "Authorization: Bearer ${API_KEY}" \
-  -H "X-Agent-ID: test-script" \
-  -H "Content-Type: application/json" \
-  -d '{"action": "list"}' | jq -r '.success // .error.code'
+rpc "tools/call" '{"name":"review","arguments":{"action":"list"}}' | jq -r 'if .error then .error.message else "ok" end'
 echo ""
 
 echo "=============================="
-echo "✅ All tool endpoints are accessible"
+echo "✅ Canonical MCP tools are accessible over JSON-RPC"
 echo ""
 echo "To run full integration tests:"
 echo "  1. Start the API server: cd api && npm run dev"
