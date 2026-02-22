@@ -72,6 +72,8 @@ function normalize(obj: unknown): unknown {
   if (parsed && typeof parsed === 'object') {
     delete (parsed as Record<string, unknown>).hints;
     delete (parsed as Record<string, unknown>).retrievalPlan;
+    delete (parsed as Record<string, unknown>).access;
+    delete (parsed as Record<string, unknown>)._meta;
   }
   return parsed;
 }
