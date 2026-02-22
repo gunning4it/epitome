@@ -5,8 +5,8 @@
  * - H-5: Block explicit schema references in SQL sandbox
  * - H-6: Escape LIKE metacharacters in consent matching
  * - H-7: Zod validation on consent PATCH endpoint
- * - M-1: MCP legacy tool call input validation
- * - M-2: MCP GET /tools requires authentication
+ * - M-1: Legacy REST MCP endpoint policy
+ * - M-2: Legacy /mcp/tools endpoint policy
  * - M-3: getUserContext per-resource consent checks
  * - M-4: MCP auth on all HTTP methods
  */
@@ -414,6 +414,26 @@ describe('Data Access Security Fixes', () => {
       expect(result.profile).not.toBeNull();
       expect(result.tables.length).toBeGreaterThan(0);
       // No graph/vectors consent
+      expect(result.topEntities).toEqual([]);
+      expect(result.recentMemories).toEqual([]);
+    });
+
+    it('should include tables when agent has only tables/* wildcard consent', async () => {
+      await grantConsent(testUser.userId, {
+        agentId: 'limited-agent',
+        resource: 'profile',
+        permission: 'read',
+      });
+      await grantConsent(testUser.userId, {
+        agentId: 'limited-agent',
+        resource: 'tables/*',
+        permission: 'read',
+      });
+
+      const result = await getUserContext({}, mcpContext);
+
+      expect(result.profile).not.toBeNull();
+      expect(result.tables.length).toBeGreaterThan(0);
       expect(result.topEntities).toEqual([]);
       expect(result.recentMemories).toEqual([]);
     });

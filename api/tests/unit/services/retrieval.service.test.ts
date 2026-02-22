@@ -654,6 +654,49 @@ describe('retrieval.service', () => {
       expect(result.coverage).toBeLessThanOrEqual(1);
     });
 
+    it('includes coverageDetails with planned, queried, and missing sources', async () => {
+      const consentChecker = makeConsentChecker(true);
+
+      const result = await retrieveKnowledge(
+        TEST_USER_ID,
+        'sushi',
+        'medium',
+        consentChecker,
+        defaultTables,
+        defaultCollections,
+        defaultProfile
+      );
+
+      expect(result).toHaveProperty('coverageDetails');
+      expect(result.coverageDetails.score).toBe(result.coverage);
+      expect(Array.isArray(result.coverageDetails.plannedSources)).toBe(true);
+      expect(Array.isArray(result.coverageDetails.queriedSources)).toBe(true);
+      expect(Array.isArray(result.coverageDetails.missingSources)).toBe(true);
+    });
+
+    it('sets uncertaintyReason when no facts are retrieved', async () => {
+      mockSearchAllVectors.mockResolvedValue([]);
+      mockGetEntityByName.mockResolvedValue([]);
+      mockTraverse.mockResolvedValue([]);
+      mockExecuteSandboxedQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      const consentChecker = makeConsentChecker(true);
+
+      const result = await retrieveKnowledge(
+        TEST_USER_ID,
+        'sushi',
+        'medium',
+        consentChecker,
+        defaultTables,
+        defaultCollections,
+        defaultProfile
+      );
+
+      expect(result.facts).toHaveLength(0);
+      expect(typeof result.uncertaintyReason).toBe('string');
+      expect(result.uncertaintyReason?.length).toBeGreaterThan(0);
+    });
+
     it('each fact has required sourceType and sourceRef fields', async () => {
       const consentChecker = makeConsentChecker(true);
 

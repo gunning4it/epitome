@@ -75,6 +75,7 @@ export const entityListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(500).default(50),
   offset: z.coerce.number().int().min(0).default(0),
   includeSynthetic: z.coerce.boolean().default(false),
+  includeDisconnected: z.coerce.boolean().default(false),
   edgeLimit: z.coerce.number().int().positive().max(2000).default(200),
   edgeOffset: z.coerce.number().int().min(0).default(0),
   stableMode: z.coerce.boolean().default(false),

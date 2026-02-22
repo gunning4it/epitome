@@ -40,15 +40,29 @@ export default function McpTools() {
         consent grants before executing any tool.
       </p>
       <p className="text-muted-foreground mb-4">
-        Tool invocation is protocol-native via JSON-RPC methods on <code className="text-xs">POST /mcp</code>{' '}
-        (<code className="text-xs">initialize</code>, <code className="text-xs">tools/list</code>, <code className="text-xs">tools/call</code>).
-        Legacy REST compatibility endpoints are disabled by default.
+        Contract is strict: only <code className="text-xs">recall</code>, <code className="text-xs">memorize</code>,
+        and <code className="text-xs">review</code> are accepted tool names. Legacy aliases and legacy REST
+        routes (<code className="text-xs">/mcp/tools</code>, <code className="text-xs">/mcp/call/:toolName</code>) are
+        disabled by default.
       </p>
       <p className="text-muted-foreground mb-4">
         If an agent calls a tool for a resource it has not been granted consent to access,
         the server returns a consent-required error with instructions for the user to grant
         permission via the dashboard.
       </p>
+      <CodeBlock
+        language="json"
+        code={`// JSON-RPC request envelope (tools/call)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "recall",
+    "arguments": {}
+  }
+}`}
+      />
 
       {/* Tool 1: recall */}
       <h2 id="recall" className="text-xl font-semibold mt-10 mb-4">recall</h2>
@@ -61,7 +75,10 @@ export default function McpTools() {
           { name: 'mode', type: 'string', required: false, description: '"context" | "knowledge" | "memory" | "graph" | "table" — explicit routing to a specific data source.' },
           { name: 'memory', type: 'object', required: false, description: 'For mode "memory" — { collection, query, minSimilarity?, limit? }' },
           { name: 'graph', type: 'object', required: false, description: 'For mode "graph" — { queryType, entityId?, relation?, maxHops?, pattern? }' },
-          { name: 'table', type: 'object', required: false, description: 'For mode "table" — { table?, filters?, sql?, limit?, offset? }' },
+          { name: 'table', type: 'string | object', required: false, description: 'For mode "table" — string shorthand ("meals") or object { table?, filters?, sql?, limit?, offset? }' },
+          { name: 'tableName', type: 'string', required: false, description: 'For mode "table" — top-level shorthand equivalent to table.table.' },
+          { name: 'sql', type: 'string', required: false, description: 'For mode "table" — top-level shorthand SQL query.' },
+          { name: 'filters', type: 'object', required: false, description: 'For mode "table" — top-level shorthand filters.' },
         ]}
       >
         <p className="text-xs text-muted-foreground mb-3">
@@ -104,10 +121,8 @@ export default function McpTools() {
 // 5. mode:"table" — sandboxed SQL query
 {
   "mode": "table",
-  "table": {
-    "table": "meals",
-    "sql": "SELECT * FROM meals WHERE calories > 500 LIMIT 10"
-  }
+  "table": "meals",
+  "sql": "SELECT * FROM meals WHERE calories > 500 LIMIT 10"
 }`}
         />
       </ToolBlock>

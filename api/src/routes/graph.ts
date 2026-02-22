@@ -107,6 +107,7 @@ graph.get(
     const filters = c.req.valid('query');
     const {
       includeSynthetic,
+      includeDisconnected,
       edgeLimit,
       edgeOffset,
       stableMode,
@@ -135,11 +136,28 @@ graph.get(
         })
       : [];
 
+    let displayEntities = visibleEntities;
+    if (!includeDisconnected) {
+      const connectedIds = new Set<number>();
+      for (const edge of scopedEdges) {
+        connectedIds.add(edge.sourceId);
+        connectedIds.add(edge.targetId);
+      }
+
+      displayEntities = visibleEntities.filter((entity) => connectedIds.has(entity.id));
+      const displayEntityIds = new Set(displayEntities.map((entity) => entity.id));
+      scopedEdges = scopedEdges.filter(
+        (edge) => displayEntityIds.has(edge.sourceId) && displayEntityIds.has(edge.targetId),
+      );
+    }
+
     logger.debug('listEntities returned', {
       count: entities.length,
       visibleCount: visibleEntities.length,
+      displayCount: displayEntities.length,
       edgeCount: scopedEdges.length,
       includeSynthetic,
+      includeDisconnected,
       edgeLimit,
       edgeOffset,
       stableMode,
@@ -154,13 +172,13 @@ graph.get(
         resource: 'graph/entities',
         details: {
           filters,
-          resultCount: visibleEntities.length,
+          resultCount: displayEntities.length,
         },
       });
     }
 
     return c.json({
-      entities: visibleEntities.map((e) => ({
+      entities: displayEntities.map((e) => ({
         id: e.id,
         type: e.type,
         name: e.name,
@@ -189,10 +207,11 @@ graph.get(
         origin: e.meta?.origin ?? null,
       })),
       meta: {
-        total: visibleEntities.length,
+        total: displayEntities.length,
         edge_total: scopedEdges.length,
         filters: entityFilters,
         includeSynthetic,
+        includeDisconnected,
         edge_pagination: {
           limit: edgeLimit,
           offset: edgeOffset,

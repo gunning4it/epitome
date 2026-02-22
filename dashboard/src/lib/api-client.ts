@@ -145,6 +145,8 @@ export const graphApi = {
         total: number;
         edge_total?: number;
         edge_pagination?: { limit: number; offset: number; hasMore: boolean };
+        includeSynthetic?: boolean;
+        includeDisconnected?: boolean;
         stableMode?: boolean;
         stableConfidenceMin?: number;
       };
