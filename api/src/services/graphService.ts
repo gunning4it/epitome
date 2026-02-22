@@ -15,7 +15,7 @@ import { withUserSchema, TransactionSql } from '@/db/client';
 import { Entity, Edge, MemoryMeta } from '@/db/schema';
 import { createMemoryMetaInternal, ORIGIN_CONFIDENCE, registerContradictionInternal } from './memoryQuality.service';
 import { withTierLimitLock } from './metering.service';
-import { validateEdge, insertEdgeQuarantine, type EntityType } from './ontology';
+import { validateEdge, normalizeEdgeRelation, insertEdgeQuarantine, type EntityType } from './ontology';
 import { logger } from '@/utils/logger';
 
 // Re-export ontology types for downstream consumers
@@ -671,6 +671,13 @@ export async function createEdge(
   input: CreateEdgeInput
 ): Promise<EdgeWithMeta | null> {
   return withUserSchema(userId, async (tx) => {
+    const normalizedRelation = normalizeEdgeRelation(input.relation);
+    const relationWasNormalized = normalizedRelation !== input.relation;
+    const edgeProperties = { ...(input.properties ?? {}) };
+    if (relationWasNormalized && edgeProperties.relation_alias === undefined) {
+      edgeProperties.relation_alias = input.relation;
+    }
+
     // Validate that source and target entities exist
     const [source, target] = await Promise.all([
       getEntityInternal(tx, input.sourceId),
@@ -688,7 +695,7 @@ export async function createEdge(
     const validation = validateEdge(
       source.type as EntityType,
       target.type as EntityType,
-      input.relation
+      normalizedRelation
     );
     if (!validation.valid) {
       if (validation.quarantine) {
@@ -699,19 +706,39 @@ export async function createEdge(
           sourceName: source.name,
           targetName: target.name,
           reason: validation.error || 'Unknown relation',
-          payload: { sourceId: input.sourceId, targetId: input.targetId, properties: input.properties },
+          payload: {
+            sourceId: input.sourceId,
+            targetId: input.targetId,
+            normalizedRelation,
+            properties: edgeProperties,
+          },
         });
-        logger.info('Edge quarantined', { relation: input.relation, source: source.name, target: target.name, reason: validation.error });
+        logger.info('Edge quarantined', {
+          relation: input.relation,
+          normalizedRelation,
+          source: source.name,
+          target: target.name,
+          reason: validation.error,
+        });
         return null;
       }
       logger.warn('Edge validation failed', { ...validation, sourceId: input.sourceId, targetId: input.targetId });
       return null;
     }
 
+    if (relationWasNormalized) {
+      logger.debug('Edge relation alias normalized', {
+        sourceId: input.sourceId,
+        targetId: input.targetId,
+        relation: input.relation,
+        normalizedRelation,
+      });
+    }
+
     // --- TEMPORAL TRANSITION for works_at ---
     // Save old edges info before marking them non-current (for contradiction detection)
     let oldWorksAtEdges: Array<{ id: number; target_name: string; meta_id: number | null }> = [];
-    if (input.relation === 'works_at') {
+    if (normalizedRelation === 'works_at') {
       oldWorksAtEdges = await tx.unsafe<Array<{ id: number; target_name: string; meta_id: number | null }>>(`
         SELECT e.id, ent.name AS target_name, mm.id AS meta_id
         FROM edges e
@@ -744,7 +771,7 @@ export async function createEdge(
       FROM edges
       WHERE source_id = ${input.sourceId}
         AND target_id = ${input.targetId}
-        AND relation = ${input.relation}
+        AND relation = ${normalizedRelation}
       LIMIT 1
     `.execute();
 
@@ -821,11 +848,11 @@ export async function createEdge(
       ) VALUES (
         ${input.sourceId},
         ${input.targetId},
-        ${input.relation},
+        ${normalizedRelation},
         ${input.weight ?? 1.0},
         ${confidence},
         ${JSON.stringify(input.evidence ?? [])},
-        ${JSON.stringify(input.properties ?? {})},
+        ${JSON.stringify(edgeProperties)},
         NOW(),
         NOW()
       )
@@ -851,7 +878,7 @@ export async function createEdge(
     `.execute();
 
     // --- CONTRADICTION DETECTION for works_at job changes ---
-    if (input.relation === 'works_at' && oldWorksAtEdges.length > 0) {
+    if (normalizedRelation === 'works_at' && oldWorksAtEdges.length > 0) {
       for (const oldEdge of oldWorksAtEdges) {
         if (oldEdge.meta_id) {
           try {

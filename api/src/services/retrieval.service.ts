@@ -452,14 +452,52 @@ async function retrieveFromVectors(
 async function retrieveFromGraph(
   userId: string,
   topic: string,
-  _intent: ClassifiedIntent,
+  intent: ClassifiedIntent,
   config: BudgetConfig,
   consentChecker: (resource: string, permission: string) => Promise<boolean>,
 ): Promise<RetrievedFact[]> {
   const hasConsent = await consentChecker('graph', 'read');
   if (!hasConsent) return [];
 
-  const entities = await getEntityByName(userId, topic, undefined, 0.3, config.maxGraphSeeds);
+  const seedTerms = [
+    topic,
+    ...topic.split(/\s+/),
+    ...intent.expandedTerms,
+  ]
+    .map((term) => term.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim())
+    .filter((term) => term.length >= 3);
+
+  const uniqueSeedTerms = [...new Set(seedTerms)].slice(0, config.maxGraphSeeds);
+  const searchTerms = uniqueSeedTerms.length > 0 ? uniqueSeedTerms : [topic];
+
+  const seedMatches = await Promise.allSettled(
+    searchTerms.map((term) =>
+      getEntityByName(
+        userId,
+        term,
+        undefined,
+        0.28,
+        Math.max(3, Math.ceil(config.maxGraphSeeds / 2)),
+      )),
+  );
+
+  const byEntityId = new Map<number, Awaited<ReturnType<typeof getEntityByName>>[number]>();
+  for (const result of seedMatches) {
+    if (result.status !== 'fulfilled') continue;
+    for (const entity of result.value) {
+      const existing = byEntityId.get(entity.id);
+      const similarity = entity.similarity ?? 0;
+      const existingSimilarity = existing?.similarity ?? 0;
+      if (!existing || similarity > existingSimilarity) {
+        byEntityId.set(entity.id, entity);
+      }
+    }
+  }
+
+  const entities = [...byEntityId.values()]
+    .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
+    .slice(0, config.maxGraphSeeds);
+
   const facts: RetrievedFact[] = [];
 
   // Convert found entities to facts
@@ -475,7 +513,7 @@ async function retrieveFromGraph(
 
   // For top seeds with high similarity, traverse relationships
   const topSeeds = entities
-    .filter(e => (e.similarity ?? 0) > 0.5)
+    .filter(e => (e.similarity ?? 0) > 0.4)
     .slice(0, 5);
 
   const traversalPromises = topSeeds.map(async (seed) => {
