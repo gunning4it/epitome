@@ -6,6 +6,7 @@ import type { ToolContext } from '@/services/tools/types';
 // Mock dependencies
 vi.mock('@/services/consent.service', () => ({
   requireConsent: vi.fn(),
+  requireDomainConsent: vi.fn(),
 }));
 vi.mock('@/services/audit.service', () => ({
   logAuditEntry: vi.fn(),
@@ -33,7 +34,7 @@ vi.mock('@/utils/logger', () => ({
   logger: { warn: vi.fn(), error: vi.fn() },
 }));
 
-import { requireConsent } from '@/services/consent.service';
+import { requireDomainConsent } from '@/services/consent.service';
 import { searchAllVectors, deleteVector } from '@/services/vector.service';
 import { getContradictions } from '@/mcp/serviceWrappers.js';
 import { updateProfile } from '@/services/tools/updateProfile';
@@ -185,7 +186,7 @@ describe('memorize facade service', () => {
   });
 
   it('returns CONSENT_DENIED when delete lacks vector write consent', async () => {
-    vi.mocked(requireConsent).mockRejectedValue(
+    vi.mocked(requireDomainConsent).mockRejectedValue(
       new Error('CONSENT_DENIED: no write access to vectors'),
     );
 

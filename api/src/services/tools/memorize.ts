@@ -14,7 +14,7 @@
  * so the LLM can immediately prompt the user to resolve.
  */
 
-import { requireConsent, requireDomainConsent } from '@/services/consent.service';
+import { requireDomainConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
 import { searchAllVectors, deleteVector } from '@/services/vector.service';
 import { getContradictions } from '@/mcp/serviceWrappers.js';
