@@ -25,8 +25,10 @@ export default function Graph() {
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [stableMode, setStableMode] = useState(false);
+  const [includeDisconnected, setIncludeDisconnected] = useState(false);
   const { data: graphData, isLoading } = useGraphEntities({
     includeSynthetic: false,
+    includeDisconnected,
     stableMode,
     stableConfidenceMin: 0.75,
     edgeLimit: 600,
@@ -123,6 +125,9 @@ export default function Graph() {
             <h1 className="text-2xl font-semibold text-foreground">Knowledge Graph</h1>
             <p className="text-muted-foreground text-sm">
               {nodes.length} entities &middot; {edges.length} connections
+              {!includeDisconnected && (
+                <span className="ml-2">— connected view</span>
+              )}
               {stableMode && edges.length === 0 && nodes.length > 0 && (
                 <span className="text-yellow-400 ml-2">
                   — try turning stable mode off to see inferred relationships
@@ -139,6 +144,13 @@ export default function Graph() {
               onClick={() => setStableMode((prev) => !prev)}
             >
               Stable mode {stableMode ? 'on' : 'off'}
+            </Button>
+            <Button
+              type="button"
+              variant={includeDisconnected ? 'default' : 'outline'}
+              onClick={() => setIncludeDisconnected((prev) => !prev)}
+            >
+              Disconnected {includeDisconnected ? 'shown' : 'hidden'}
             </Button>
             <Input
               type="text"
@@ -180,7 +192,11 @@ export default function Graph() {
               <EmptyState
                 icon={Network}
                 title="No entities in knowledge graph yet"
-                description="Start adding memories to build your knowledge graph"
+                description={
+                  includeDisconnected
+                    ? 'Start adding memories to build your knowledge graph'
+                    : 'No connected entities yet. You can toggle disconnected nodes to inspect isolated entities.'
+                }
               />
             </div>
           )}

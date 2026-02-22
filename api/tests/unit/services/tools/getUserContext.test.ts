@@ -7,6 +7,7 @@ import type { ToolContext } from '@/services/tools/types';
 
 vi.mock('@/services/consent.service', () => ({
   requireConsent: vi.fn(),
+  requireDomainConsent: vi.fn(),
 }));
 
 vi.mock('@/services/audit.service', () => ({
@@ -47,7 +48,7 @@ vi.mock('@/services/retrieval.service', () => ({
 }));
 
 import { getUserContext } from '@/services/tools/getUserContext';
-import { requireConsent } from '@/services/consent.service';
+import { requireConsent, requireDomainConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
 import { getLatestProfile } from '@/services/profile.service';
 import { listTables } from '@/services/table.service';
@@ -90,9 +91,22 @@ const mockVectors = [
 
 function consentAllowed() {
   (requireConsent as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  (requireDomainConsent as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 }
 
 function consentDenied(resource: string) {
+  if (resource === 'tables' || resource === 'vectors') {
+    (requireDomainConsent as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_userId: string, _agentId: string, res: string) => {
+        if (res === resource) {
+          throw new Error(`CONSENT_DENIED: Agent does not have read access to ${res}`);
+        }
+      },
+    );
+    (requireConsent as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    return;
+  }
+
   (requireConsent as ReturnType<typeof vi.fn>).mockImplementation(
     async (_userId: string, _agentId: string, res: string) => {
       if (res === resource) {
@@ -100,10 +114,14 @@ function consentDenied(resource: string) {
       }
     },
   );
+  (requireDomainConsent as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 }
 
 function consentDeniedAll() {
   (requireConsent as ReturnType<typeof vi.fn>).mockRejectedValue(
+    new Error('CONSENT_DENIED: No access'),
+  );
+  (requireDomainConsent as ReturnType<typeof vi.fn>).mockRejectedValue(
     new Error('CONSENT_DENIED: No access'),
   );
 }
@@ -212,7 +230,8 @@ describe('getUserContext service', () => {
   });
 
   it('returns empty tables when tables consent is denied', async () => {
-    (requireConsent as ReturnType<typeof vi.fn>).mockImplementation(
+    (requireConsent as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (requireDomainConsent as ReturnType<typeof vi.fn>).mockImplementation(
       async (_userId: string, _agentId: string, res: string) => {
         if (res === 'tables') {
           throw new Error('CONSENT_DENIED: No tables access');
@@ -237,7 +256,8 @@ describe('getUserContext service', () => {
   });
 
   it('returns empty vectors sections when vectors consent is denied', async () => {
-    (requireConsent as ReturnType<typeof vi.fn>).mockImplementation(
+    (requireConsent as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (requireDomainConsent as ReturnType<typeof vi.fn>).mockImplementation(
       async (_userId: string, _agentId: string, res: string) => {
         if (res === 'vectors') {
           throw new Error('CONSENT_DENIED: No vectors access');

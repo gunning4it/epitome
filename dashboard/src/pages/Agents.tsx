@@ -179,19 +179,19 @@ function ApiKeyResult({ apiKey, agentName, onDone }: {
 
   const curlSnippet = `curl -X POST ${API_BASE_URL}/mcp \\
   -H "Authorization: Bearer ${apiKey}" \\
-  -H "Content-Type: application/json" \\
   -H "Accept: application/json, text/event-stream" \\
+  -H "Content-Type: application/json" \\
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall","arguments":{}}}'`;
 
-  const restSnippet = `Base URL: ${API_BASE_URL}
+  const restSnippet = `MCP endpoint: ${API_BASE_URL}/mcp
 Auth Header: Authorization: Bearer ${apiKey}
 
-POST /mcp
-- initialize               - MCP handshake
-- tools/list               - List canonical tools
-- tools/call               - Call recall / memorize / review
+JSON-RPC method: tools/list
+JSON-RPC method: tools/call name=recall
+JSON-RPC method: tools/call name=memorize
+JSON-RPC method: tools/call name=review
 
-Legacy /mcp/tools and /mcp/call/:toolName are disabled by default.`;
+Legacy REST endpoints /mcp/tools and /mcp/call/:toolName are disabled by default (410).`;
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onDone(); }}>
@@ -369,18 +369,18 @@ function AgentCard({ agent }: { agent: AgentWithConsent }) {
   }, null, 2);
   const curlSnippet = `curl -X POST ${API_BASE_URL}/mcp \\
   -H "Authorization: Bearer ${placeholder}" \\
-  -H "Content-Type: application/json" \\
   -H "Accept: application/json, text/event-stream" \\
+  -H "Content-Type: application/json" \\
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall","arguments":{}}}'`;
-  const restSnippet = `Base URL: ${API_BASE_URL}
+  const restSnippet = `MCP endpoint: ${API_BASE_URL}/mcp
 Auth Header: Authorization: Bearer ${placeholder}
 
-POST /mcp
-- initialize               - MCP handshake
-- tools/list               - List canonical tools
-- tools/call               - Call recall / memorize / review
+JSON-RPC method: tools/list
+JSON-RPC method: tools/call name=recall
+JSON-RPC method: tools/call name=memorize
+JSON-RPC method: tools/call name=review
 
-Legacy /mcp/tools and /mcp/call/:toolName are disabled by default.`;
+Legacy REST endpoints /mcp/tools and /mcp/call/:toolName are disabled by default (410).`;
 
   return (
     <Card>

@@ -18,7 +18,7 @@ import {
 import { ingestTableRecord } from '@/services/writeIngestion.service';
 import { getEffectiveTier } from '@/services/metering.service';
 import { executeSandboxedQuery } from '@/services/sqlSandbox.service';
-import { requireConsent } from '@/services/consent.service';
+import { requireConsent, requireDomainConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
 import { recordAccess } from '@/services/memoryQuality.service';
 import {
@@ -60,7 +60,7 @@ tables.get('/', requireAuth, async (c) => {
 
   // Check consent for agent requests
   if (authType === 'api_key' && agentId) {
-    await requireConsent(userId, agentId, 'tables', 'read');
+    await requireDomainConsent(userId, agentId, 'tables', 'read');
   }
 
   // Get all tables

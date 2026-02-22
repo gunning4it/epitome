@@ -56,6 +56,13 @@ export interface RetrievalResult {
   facts: RetrievedFact[];
   sourcesQueried: string[];
   coverage: number;
+  coverageDetails: {
+    score: number;
+    plannedSources: SourceType[];
+    queriedSources: SourceType[];
+    missingSources: SourceType[];
+  };
+  uncertaintyReason?: string;
   warnings: string[];
   timingMs: number;
 }
@@ -626,7 +633,7 @@ export async function retrieveKnowledge(
 ): Promise<RetrievalResult> {
   const startTime = Date.now();
   const warnings: string[] = [];
-  const sourcesQueried: string[] = [];
+  const sourcesQueried: SourceType[] = [];
   let allFacts: RetrievedFact[] = [];
 
   const intent = classifyIntent(topic);
@@ -663,7 +670,7 @@ export async function retrieveKnowledge(
   // Collect results and warnings
   if (vectorResult.status === 'fulfilled') {
     allFacts.push(...vectorResult.value);
-    sourcesQueried.push('vectors');
+    sourcesQueried.push('vector');
   } else {
     warnings.push(`Vector search failed: ${vectorResult.reason}`);
   }
@@ -677,7 +684,7 @@ export async function retrieveKnowledge(
 
   if (tableResult.status === 'fulfilled') {
     allFacts.push(...tableResult.value);
-    if (selectedTables.length > 0) sourcesQueried.push('tables');
+    if (selectedTables.length > 0) sourcesQueried.push('table');
   } else {
     warnings.push(`Table search failed: ${tableResult.reason}`);
   }
@@ -706,19 +713,37 @@ export async function retrieveKnowledge(
   // Fuse, dedup, and truncate
   const fused = fuseFacts(allFacts, config.maxTotalFacts);
 
-  const totalPossibleSources =
-    (selectedCollections.length > 0 ? 1 : 0) +
-    (selectedTables.length > 0 ? 1 : 0) +
-    (useGraph ? 1 : 0) +
-    (useProfile ? 1 : 0);
+  const plannedSources: SourceType[] = ['vector'];
+  if (selectedTables.length > 0) plannedSources.push('table');
+  if (useGraph) plannedSources.push('graph');
+  if (useProfile) plannedSources.push('profile');
+  const queriedSources = [...new Set(sourcesQueried)];
+  const missingSources = plannedSources.filter((source) => !queriedSources.includes(source));
+  const coverageScore = plannedSources.length > 0 ? queriedSources.length / plannedSources.length : 0;
+
+  let uncertaintyReason: string | undefined;
+  if (fused.length === 0) {
+    uncertaintyReason = 'No corroborated facts matched the query across permitted sources.';
+  } else if (coverageScore < 0.6 && missingSources.length > 0) {
+    uncertaintyReason = `Partial source coverage; missing or empty sources: ${missingSources.join(', ')}`;
+  } else if (warnings.length > 0) {
+    uncertaintyReason = 'Some retrieval sources returned warnings; confidence may be partial.';
+  }
 
   return {
     topic,
     intent,
     budget,
     facts: fused,
-    sourcesQueried,
-    coverage: totalPossibleSources > 0 ? sourcesQueried.length / totalPossibleSources : 0,
+    sourcesQueried: queriedSources,
+    coverage: coverageScore,
+    coverageDetails: {
+      score: coverageScore,
+      plannedSources,
+      queriedSources,
+      missingSources,
+    },
+    uncertaintyReason,
     warnings,
     timingMs: Date.now() - startTime,
   };

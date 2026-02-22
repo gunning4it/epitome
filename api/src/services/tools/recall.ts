@@ -25,7 +25,12 @@ export interface RecallArgs {
   mode?: 'context' | 'knowledge' | 'memory' | 'graph' | 'table';
   memory?: { collection: string; query: string; minSimilarity?: number; limit?: number };
   graph?: { queryType: 'traverse' | 'pattern'; entityId?: number; relation?: string; maxHops?: number; pattern?: string | { entityType?: string; entityName?: string; relation?: string; targetType?: string } };
-  table?: { table?: string; tableName?: string; filters?: Record<string, unknown>; sql?: string; limit?: number; offset?: number };
+  table?: string | { table?: string; tableName?: string; filters?: Record<string, unknown>; sql?: string; limit?: number; offset?: number };
+  tableName?: string;
+  filters?: Record<string, unknown>;
+  sql?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export async function recall(
@@ -87,7 +92,33 @@ export async function recall(
 
       case 'table':
         if (!args.table) {
-          return listTables({}, ctx);
+          const hasTopLevelTableQuery =
+            typeof args.tableName === 'string' ||
+            typeof args.sql === 'string' ||
+            (args.filters && typeof args.filters === 'object' && !Array.isArray(args.filters));
+
+          if (!hasTopLevelTableQuery) {
+            return listTables({}, ctx);
+          }
+
+          return queryTable(
+            {
+              table: args.tableName,
+              sql: args.sql,
+              filters: args.filters,
+              limit: args.limit,
+              offset: args.offset,
+            },
+            ctx,
+          );
+        }
+
+        if (typeof args.table === 'string') {
+          const table = args.table.trim();
+          if (!table) {
+            return listTables({}, ctx);
+          }
+          return queryTable({ table }, ctx);
         }
 
         if (typeof args.table !== 'object' || Array.isArray(args.table)) {
@@ -103,19 +134,35 @@ export async function recall(
           tableName?: string;
           sql?: string;
           filters?: Record<string, unknown>;
+          limit?: number;
+          offset?: number;
         };
+        const normalizedTableName =
+          (typeof tableArgs.table === 'string' && tableArgs.table.trim()) ||
+          (typeof tableArgs.tableName === 'string' && tableArgs.tableName.trim()) ||
+          (typeof args.tableName === 'string' && args.tableName.trim()) ||
+          undefined;
+
+        const normalizedArgs = {
+          table: normalizedTableName,
+          sql: tableArgs.sql ?? args.sql,
+          filters: tableArgs.filters ?? args.filters,
+          limit: tableArgs.limit ?? args.limit,
+          offset: tableArgs.offset ?? args.offset,
+        };
+
         const hasFilters =
-          tableArgs.filters &&
-          typeof tableArgs.filters === 'object' &&
-          !Array.isArray(tableArgs.filters) &&
-          Object.keys(tableArgs.filters).length > 0;
-        const hasQuery = Boolean(tableArgs.table || tableArgs.tableName || tableArgs.sql || hasFilters);
+          normalizedArgs.filters &&
+          typeof normalizedArgs.filters === 'object' &&
+          !Array.isArray(normalizedArgs.filters) &&
+          Object.keys(normalizedArgs.filters).length > 0;
+        const hasQuery = Boolean(normalizedArgs.table || normalizedArgs.sql || hasFilters);
 
         if (!hasQuery) {
           return listTables({}, ctx);
         }
 
-        return queryTable(tableArgs, ctx);
+        return queryTable(normalizedArgs, ctx);
 
       default:
         return toolFailure(

@@ -229,7 +229,17 @@ export async function buildExtractionContext(userId: string): Promise<Extraction
       if (profile.data.family) {
         const members = Array.isArray(profile.data.family)
           ? profile.data.family
-          : Object.entries(profile.data.family).map(([rel, m]: [string, any]) => ({ ...m, relation: rel }));
+          : Object.entries(profile.data.family).flatMap(([rel, m]: [string, any]) => {
+              if (Array.isArray(m)) {
+                return m
+                  .filter((member) => member && typeof member === 'object')
+                  .map((member) => ({ ...member, relation: normalizeFamilyRole(rel) }));
+              }
+              if (m && typeof m === 'object') {
+                return [{ ...m, relation: normalizeFamilyRole(rel) }];
+              }
+              return [];
+            });
         for (const m of members) {
           if (m.name) parts.push(`${m.relation || 'family'}: ${m.name}`);
         }
@@ -376,6 +386,13 @@ const SPOUSE_ROLE_SET = new Set(['wife', 'husband', 'spouse', 'partner']);
 function mapFamilyRoleToRelation(role: string): string {
   if (SPOUSE_ROLE_SET.has(role)) return 'married_to';
   return 'family_member';
+}
+
+function normalizeFamilyRole(role: string): string {
+  const normalized = role.trim().toLowerCase();
+  if (normalized === 'children' || normalized === 'kids') return 'child';
+  if (normalized === 'parents') return 'parent';
+  return normalized;
 }
 
 function extractFamilyMemberEntities(
@@ -952,15 +969,28 @@ const EXTRACTION_RULES: Record<string, (data: Record<string, unknown>) => Extrac
     // Extract family members from profile.family array
     if (data.family && Array.isArray(data.family)) {
       for (const member of data.family) {
-        entities.push(...extractFamilyMemberEntities(member, member.relation));
+        if (member && typeof member === 'object') {
+          const relation = typeof member.relation === 'string'
+            ? normalizeFamilyRole(member.relation)
+            : 'family_member';
+          entities.push(...extractFamilyMemberEntities(member, relation));
+        }
       }
     }
 
-    // Extract family members from profile.family object (e.g. { wife: { name, birthday }, daughter: { ... } })
+    // Extract family members from profile.family object
+    // (e.g. { wife: { name, birthday }, children: [{ name: ... }] })
     if (data.family && typeof data.family === 'object' && !Array.isArray(data.family)) {
       for (const [relation, member] of Object.entries(data.family as Record<string, any>)) {
-        if (member && typeof member === 'object') {
-          entities.push(...extractFamilyMemberEntities(member, relation));
+        const normalizedRelation = normalizeFamilyRole(relation);
+        if (Array.isArray(member)) {
+          for (const nestedMember of member) {
+            if (nestedMember && typeof nestedMember === 'object') {
+              entities.push(...extractFamilyMemberEntities(nestedMember, normalizedRelation));
+            }
+          }
+        } else if (member && typeof member === 'object') {
+          entities.push(...extractFamilyMemberEntities(member, normalizedRelation));
         }
       }
     }
@@ -1969,6 +1999,8 @@ export async function extractEntitiesFromRecord(
       // Collect ref for inter-entity edge creation
       createdEntityRefs.push({ id: entityId, name: extracted.name, type: extracted.type });
 
+      let edgeCreated = false;
+
       // Create edge if specified
       if (extracted.edge && entityId) {
         let sourceId: number;
@@ -2031,12 +2063,49 @@ export async function extractEntitiesFromRecord(
             relation: extracted.edge.relation,
           });
         } else if (!extracted.edge.sourceRef && ['works_at', 'attended'].includes(extracted.edge.relation)) {
+          edgeCreated = true;
           // Fire-and-forget: sync entity data to profile
           void syncEntityToProfile(userId, {
             name: extracted.name, type: extracted.type, properties: extracted.properties,
           }, extracted.edge.relation, extracted.edge.properties || {}, true).catch(err =>
             logger.warn('Profile sync failed', { error: String(err) })
           );
+        } else {
+          edgeCreated = true;
+        }
+      }
+
+      // Orphan prevention: if no valid edge was created, add a fallback owner link.
+      if (!edgeCreated && entityId) {
+        const ownerEntity = await findOrCreateOwnerEntity(userId);
+        if (ownerEntity.id !== entityId) {
+          const fallbackEdge = await createEdge(userId, {
+            sourceId: ownerEntity.id,
+            targetId: entityId,
+            relation: 'related_to',
+            weight: 0.2,
+            properties: {
+              fallback: true,
+              reason: extracted.edge ? 'primary_edge_rejected' : 'missing_edge',
+            },
+            evidence: [
+              {
+                table: tableName,
+                row_id: record.id,
+                method: methodUsed,
+                extracted_at: new Date().toISOString(),
+              },
+            ],
+            origin: 'system',
+            agentSource: 'entity_extraction_fallback',
+          });
+
+          if (!fallbackEdge) {
+            logger.warn('Fallback edge creation rejected', {
+              entity: extracted.name,
+              entityId,
+            });
+          }
         }
       }
     } catch (error) {

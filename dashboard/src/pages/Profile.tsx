@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { Profile } from '@/lib/types';
 import { useProfile, useProfileHistory, useUpdateProfile } from '@/hooks/useApi';
 import { formatDateTime } from '@/lib/utils';
@@ -20,6 +20,93 @@ type FamilyMember = {
   birthday?: string;
   [key: string]: unknown;
 };
+
+const FAMILY_RELATION_ALIASES: Record<string, string> = {
+  children: 'child',
+  kids: 'child',
+  parents: 'parent',
+  siblings: 'sibling',
+  spouses: 'spouse',
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function humanizeLabel(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function normalizeFamilyRelation(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, '_');
+  if (FAMILY_RELATION_ALIASES[normalized]) {
+    return FAMILY_RELATION_ALIASES[normalized];
+  }
+  if (normalized.endsWith('s') && normalized.length > 1) {
+    return normalized.slice(0, -1);
+  }
+  return normalized;
+}
+
+function isFamilyMemberShape(value: unknown): value is FamilyMember {
+  if (!isRecord(value)) return false;
+  return 'name' in value || 'birthday' in value || 'age' in value || 'date_of_birth' in value;
+}
+
+function formatPrimitive(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value === null || value === undefined) return 'Not set';
+  return JSON.stringify(value);
+}
+
+function renderStructuredValue(value: unknown, depth = 0): ReactNode {
+  if (value === null || value === undefined) {
+    return <span className="text-muted-foreground">Not set</span>;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span className="text-muted-foreground">None</span>;
+    }
+    if (depth >= 2) {
+      return <span className="text-foreground">{JSON.stringify(value)}</span>;
+    }
+    return (
+      <ul className="list-disc list-inside space-y-1">
+        {value.map((item, index) => (
+          <li key={`${depth}-${index}`} className="text-foreground">
+            {renderStructuredValue(item, depth + 1)}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  if (isRecord(value)) {
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      return <span className="text-muted-foreground">Empty object</span>;
+    }
+    if (depth >= 2) {
+      return <span className="text-foreground">{JSON.stringify(value)}</span>;
+    }
+    return (
+      <div className="space-y-1">
+        {entries.map(([key, nestedValue]) => (
+          <div key={`${depth}-${key}`} className="text-sm">
+            <span className="font-medium text-foreground">{humanizeLabel(key)}:</span>
+            <div className="mt-1 text-muted-foreground">{renderStructuredValue(nestedValue, depth + 1)}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <span className="text-foreground">{formatPrimitive(value)}</span>;
+}
 
 function getWorkRole(data: Partial<Profile['data']>): string | undefined {
   return data.career?.primary_job?.title || data.work?.role;
@@ -204,14 +291,46 @@ export default function Profile() {
               const familyContext: Array<{ key: string; value: unknown }> = [];
 
               if (Array.isArray(family)) {
-                familyMembers.push(...(family as FamilyMember[]));
+                for (const [index, member] of family.entries()) {
+                  if (isFamilyMemberShape(member)) {
+                    familyMembers.push(member);
+                  } else {
+                    familyContext.push({ key: `members_${index}`, value: member });
+                  }
+                }
               } else if (family && typeof family === 'object') {
                 for (const [key, value] of Object.entries(family as Record<string, unknown>)) {
-                  const isMember =
-                    value && typeof value === 'object' && !Array.isArray(value) &&
-                    ('name' in (value as Record<string, unknown>) || 'birthday' in (value as Record<string, unknown>));
-                  if (isMember) {
-                    familyMembers.push({ ...(value as FamilyMember), relation: key });
+                  if (Array.isArray(value)) {
+                    const relation = normalizeFamilyRelation(key);
+                    const memberValues = value.filter(isFamilyMemberShape);
+                    if (memberValues.length > 0) {
+                      familyMembers.push(
+                        ...memberValues.map((member) => ({
+                          ...member,
+                          relation:
+                            typeof member.relation === 'string'
+                              ? normalizeFamilyRelation(member.relation)
+                              : relation,
+                        })),
+                      );
+                    }
+                    if (memberValues.length !== value.length) {
+                      familyContext.push({
+                        key,
+                        value: value.filter((entry) => !isFamilyMemberShape(entry)),
+                      });
+                    }
+                    continue;
+                  }
+
+                  if (isFamilyMemberShape(value)) {
+                    familyMembers.push({
+                      ...(value as FamilyMember),
+                      relation:
+                        typeof (value as FamilyMember).relation === 'string'
+                          ? normalizeFamilyRelation((value as FamilyMember).relation as string)
+                          : normalizeFamilyRelation(key),
+                    });
                   } else {
                     familyContext.push({ key, value });
                   }
@@ -225,9 +344,9 @@ export default function Profile() {
                       {familyMembers.map((member, idx: number) => (
                         <div key={idx} className="flex items-center justify-between bg-muted rounded-lg p-3">
                           <div>
-                            <div className="font-medium text-foreground">{member.name}</div>
+                            <div className="font-medium text-foreground">{member.name || 'Unnamed family member'}</div>
                             <div className="text-sm text-muted-foreground">
-                              {member.relation?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                              {humanizeLabel(member.relation || 'family_member')}
                             </div>
                           </div>
                           {member.birthday && (
@@ -242,9 +361,9 @@ export default function Profile() {
                       {familyContext.map(({ key, value }) => (
                         <div key={key} className="text-sm text-muted-foreground">
                           <span className="font-medium text-foreground">
-                            {key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}:
+                            {humanizeLabel(key)}:
                           </span>{' '}
-                          {String(value)}
+                          {renderStructuredValue(value)}
                         </div>
                       ))}
                     </div>
