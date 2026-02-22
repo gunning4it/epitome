@@ -48,7 +48,7 @@ const sections = [
   },
   {
     title: 'AI SDK Tools',
-    description: 'Use searchMemory/saveMemory/getUserContext in generateText',
+    description: 'AI SDK tool bindings for searchMemory and saveMemory',
     icon: Bot,
     path: '/docs/javascript-sdk-ai-tools',
     color: 'text-violet-400',
@@ -134,7 +134,7 @@ export default function DocsIndex() {
                     <Icon className={`size-5 ${section.color}`} />
                     <CardTitle className="text-base">{section.title}</CardTitle>
                   </div>
-                  <CardDescription>{section.description}</CardDescription>
+                  <CardDescription className="line-clamp-2">{section.description}</CardDescription>
                 </CardHeader>
               </Card>
             </Link>

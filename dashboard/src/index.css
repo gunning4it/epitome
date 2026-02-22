@@ -241,6 +241,10 @@ body {
   text-underline-offset: 2px;
 }
 
+.docs-prose a:has([data-slot="card"]) {
+  text-decoration: none;
+}
+
 .docs-prose a:hover {
   opacity: 0.8;
 }
