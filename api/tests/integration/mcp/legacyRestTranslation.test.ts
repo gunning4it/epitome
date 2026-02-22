@@ -1,18 +1,30 @@
 /**
- * Integration Tests — Legacy tool translation on /mcp/call/:toolName REST route
+ * Integration Tests — legacy REST MCP endpoints compatibility mode.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import app from '@/index';
+import { Hono } from 'hono';
+import { authResolver } from '@/middleware/auth';
+import { createMcpRoutes } from '@/mcp/handler';
 import { createTestUser, cleanupTestUser, type TestUser } from '../../helpers/db';
 import { createTestAuthHeaders } from '../../helpers/app';
 import { grantConsent } from '@/services/consent.service';
+import type { HonoEnv } from '@/types/hono';
 
-describe('MCP legacy REST translation (/mcp/call/:toolName)', () => {
+function buildTestApp() {
+  const app = new Hono<HonoEnv>();
+  app.use('*', authResolver);
+  app.route('/mcp', createMcpRoutes());
+  return app;
+}
+
+describe('MCP legacy REST endpoints (/mcp/call/:toolName)', () => {
   let testUser: TestUser;
   let headers: Headers;
 
   beforeEach(async () => {
+    delete process.env.MCP_ENABLE_LEGACY_REST_ENDPOINTS;
+    delete process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION;
     testUser = await createTestUser();
     headers = createTestAuthHeaders(testUser, 'test-rest-agent');
 
@@ -29,24 +41,29 @@ describe('MCP legacy REST translation (/mcp/call/:toolName)', () => {
   });
 
   afterEach(async () => {
+    delete process.env.MCP_ENABLE_LEGACY_REST_ENDPOINTS;
+    delete process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION;
     await cleanupTestUser(testUser.userId);
   });
 
-  it('translates list_tables to recall table mode', async () => {
+  it('is disabled by default', async () => {
+    const app = buildTestApp();
     const response = await app.request('/mcp/call/list_tables', {
       method: 'POST',
       headers,
       body: JSON.stringify({}),
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(410);
     const body = await response.json() as any;
-    expect(body.success).toBe(true);
-    expect(body.result).toHaveProperty('tables');
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('LEGACY_ENDPOINT_DISABLED');
   });
 
-  it('translates get_user_context with topic to context-mode recall', async () => {
-    const response = await app.request('/mcp/call/get_user_context', {
+  it('compat mode: supports canonical tools when REST endpoint flag is enabled', async () => {
+    process.env.MCP_ENABLE_LEGACY_REST_ENDPOINTS = 'true';
+    const app = buildTestApp();
+    const response = await app.request('/mcp/call/recall', {
       method: 'POST',
       headers,
       body: JSON.stringify({ topic: 'food' }),
@@ -55,11 +72,14 @@ describe('MCP legacy REST translation (/mcp/call/:toolName)', () => {
     expect(response.status).toBe(200);
     const body = await response.json() as any;
     expect(body.success).toBe(true);
-    expect(body.result).toHaveProperty('profile');
-    expect(body.result).not.toHaveProperty('facts');
+    expect(body.result).toHaveProperty('facts');
   });
 
-  it('translates add_record and query_table legacy calls', async () => {
+  it('compat mode: can translate legacy names only with translation flag', async () => {
+    process.env.MCP_ENABLE_LEGACY_REST_ENDPOINTS = 'true';
+    process.env.MCP_ENABLE_LEGACY_TOOL_TRANSLATION = 'true';
+    const app = buildTestApp();
+
     const addResponse = await app.request('/mcp/call/add_record', {
       method: 'POST',
       headers,

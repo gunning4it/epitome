@@ -6,8 +6,8 @@
  *
  * Routes:
  * - / (all methods) - MCP Streamable HTTP protocol (JSON-RPC 2.0)
- * - /tools - List available tools (legacy REST)
- * - /call/:toolName - Call a specific tool (legacy REST)
+ * - /tools - Legacy REST compatibility route (disabled by default)
+ * - /call/:toolName - Legacy REST compatibility route (disabled by default)
  */
 
 import { Context, Hono } from 'hono';
@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { getToolDefinitions, executeTool, McpContext } from './server.js';
 import { createMcpProtocolServer } from './protocol.js';
 import { rewriteLegacyJsonRpc, translateLegacyToolCall } from './legacyTranslator.js';
+import { isLegacyRestEndpointsEnabled, isLegacyToolTranslationEnabled } from './compat.js';
 import { logger } from '@/utils/logger';
 import { recordApiCall, getEffectiveTier } from '@/services/metering.service';
 import { x402Service } from '@/services/x402.service';
@@ -101,6 +102,8 @@ function parseX402PaymentResponse(header: string): X402PaymentParsed & { raw: st
  */
 export function createMcpRoutes(): Hono<HonoEnv> {
   const app = new Hono<HonoEnv>();
+  const legacyToolTranslationEnabled = isLegacyToolTranslationEnabled();
+  const legacyRestEnabled = isLegacyRestEndpointsEnabled();
 
   // ─── x402 conditional payment middleware ───────────────────
   // Applies only to free-tier agent requests when X402_ENABLED=true.
@@ -234,7 +237,7 @@ export function createMcpRoutes(): Hono<HonoEnv> {
       let parsedBody: unknown | undefined;
       if (c.req.method === 'POST') {
         const contentType = c.req.header('content-type');
-        if (contentType && contentType.includes('application/json')) {
+        if (legacyToolTranslationEnabled && contentType && contentType.includes('application/json')) {
           try {
             // Parse a clone so transport can still parse the original request body on its own.
             const body = await c.req.raw.clone().json();
@@ -268,10 +271,27 @@ export function createMcpRoutes(): Hono<HonoEnv> {
     }
   });
 
-  // --- Legacy REST endpoints (backward compatibility) ---
+  // --- Legacy REST endpoints (opt-in compatibility only) ---
+  if (!legacyRestEnabled) {
+    app.get('/tools', (c) => c.json({
+      success: false,
+      error: {
+        code: 'LEGACY_ENDPOINT_DISABLED',
+        message: 'Legacy endpoint disabled. Use MCP JSON-RPC methods tools/list and tools/call.',
+      },
+    }, 410));
 
-  // List tools
-  // M-2 SECURITY FIX: Require authentication for tool listing
+    app.post('/call/:toolName', (c) => c.json({
+      success: false,
+      error: {
+        code: 'LEGACY_ENDPOINT_DISABLED',
+        message: 'Legacy endpoint disabled. Use MCP JSON-RPC tools/call with canonical tools: recall, memorize, review.',
+      },
+    }, 410));
+
+    return app;
+  }
+
   app.get('/tools', (c) => {
     const userId = c.get('userId');
     if (!userId) {
@@ -282,14 +302,10 @@ export function createMcpRoutes(): Hono<HonoEnv> {
     });
   });
 
-  // Call a tool
-  // M-1 SECURITY FIX: Validate tool name and request body before execution
   app.post('/call/:toolName', async (c) => {
     let toolName = c.req.param('toolName');
 
     try {
-      // Build MCP context from auth middleware (runs before tool validation
-      // so unauthenticated requests get 401, not a tool-enumeration signal)
       const context = buildMcpContext(c);
 
       let args: unknown;
@@ -302,30 +318,29 @@ export function createMcpRoutes(): Hono<HonoEnv> {
         );
       }
 
-      // M-1: Validate request body is a plain object (not array, not primitive)
       if (args === null || typeof args !== 'object' || Array.isArray(args)) {
         return c.json(
           { success: false, error: { code: 'BAD_REQUEST', message: 'Request body must be a JSON object' } },
-          400
+          400,
         );
       }
 
-      const legacy = translateLegacyToolCall(toolName, args as Record<string, unknown>);
-      if (legacy) {
-        toolName = legacy.toolName;
-        args = legacy.args;
+      if (legacyToolTranslationEnabled) {
+        const legacy = translateLegacyToolCall(toolName, args as Record<string, unknown>);
+        if (legacy) {
+          toolName = legacy.toolName;
+          args = legacy.args;
+        }
       }
 
-      // M-1: Validate toolName against known tool names
       const knownTools = getToolDefinitions().map((t) => t.name);
       if (!knownTools.includes(toolName)) {
         return c.json(
           { success: false, error: { code: 'NOT_FOUND', message: `Unknown tool: ${toolName}` } },
-          404
+          404,
         );
       }
 
-      // Execute tool — returns ToolResult (success or failure)
       const result = await executeTool(toolName, args, context);
 
       if (!result.success) {
@@ -364,7 +379,7 @@ export function createMcpRoutes(): Hono<HonoEnv> {
         const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
         c.header(
           'WWW-Authenticate',
-          `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`
+          `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
         );
       }
 
@@ -376,7 +391,7 @@ export function createMcpRoutes(): Hono<HonoEnv> {
             message: errorMessage,
           },
         },
-        statusCode
+        statusCode,
       );
     }
   });

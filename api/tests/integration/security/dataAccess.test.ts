@@ -268,10 +268,10 @@ describe('Data Access Security Fixes', () => {
   });
 
   // ============================================================
-  // M-1: MCP Legacy Tool Call Input Validation
+  // M-1: Legacy REST MCP endpoints are disabled by default
   // ============================================================
-  describe('M-1: MCP Legacy Tool Call Input Validation', () => {
-    it('should return 404 for unknown tool name', async () => {
+  describe('M-1: Legacy REST MCP endpoint policy', () => {
+    it('should return 410 for /mcp/call/:toolName by default', async () => {
       const headers = createTestAuthHeaders(testUser);
       const response = await app.request('/mcp/call/nonexistent_tool', {
         method: 'POST',
@@ -279,117 +279,69 @@ describe('Data Access Security Fixes', () => {
         body: JSON.stringify({}),
       });
 
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(410);
       const body = await response.json();
       expect(body.success).toBe(false);
-      expect(body.error.message).toContain('Unknown tool');
+      expect(body.error.code).toBe('LEGACY_ENDPOINT_DISABLED');
     });
 
-    it('should return 400 for array body (not object)', async () => {
+    it('should still allow protocol-native MCP tools/call through JSON-RPC route', async () => {
       const headers = createTestAuthHeaders(testUser);
 
-      // Grant consent so the tool name check passes
       await grantConsent(testUser.userId, {
         agentId: 'test-agent',
         resource: 'profile',
         permission: 'read',
       });
 
-      const response = await app.request('/mcp/call/recall', {
+      const response = await app.request('/mcp', {
         method: 'POST',
-        headers,
-        body: JSON.stringify([1, 2, 3]),
-      });
-
-      expect(response.status).toBe(400);
-      const body = await response.json();
-      expect(body.error.message).toContain('JSON object');
-    });
-
-    it('should accept valid tool call with proper body', async () => {
-      const headers = createTestAuthHeaders(testUser);
-
-      // Grant consent
-      await grantConsent(testUser.userId, {
-        agentId: 'test-agent',
-        resource: 'profile',
-        permission: 'read',
-      });
-      await grantConsent(testUser.userId, {
-        agentId: 'test-agent',
-        resource: 'tables',
-        permission: 'read',
-      });
-
-      const response = await app.request('/mcp/call/recall', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ topic: 'food' }),
+        headers: {
+          ...Object.fromEntries(headers.entries()),
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            name: 'recall',
+            arguments: { topic: 'food' },
+          },
+        }),
       });
 
       expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body.success).toBe(true);
-    });
-
-    it('should return 403 with success:false when consent is denied', async () => {
-      const headers = createTestAuthHeaders(testUser);
-
-      // No consent granted — memorize delete requires vectors:write
-      const response = await app.request('/mcp/call/memorize', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ text: 'delete this', action: 'delete' }),
-      });
-
-      expect(response.status).toBe(403);
-      const body = await response.json();
-      expect(body.success).toBe(false);
-      expect(body.error).toBeDefined();
-      expect(body.error.code).toBe('CONSENT_DENIED');
-      expect(body.error.message).toMatch(/CONSENT_DENIED/);
-    });
-
-    it('should return 400 with success:false for INVALID_ARGS', async () => {
-      const headers = createTestAuthHeaders(testUser);
-
-      const response = await app.request('/mcp/call/memorize', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ text: '' }),
-      });
-
-      expect(response.status).toBe(400);
-      const body = await response.json();
-      expect(body.success).toBe(false);
-      expect(body.error).toBeDefined();
-      expect(body.error.code).toBe('INVALID_ARGS');
+      expect(body.result).toBeDefined();
+      expect(body.result.isError).toBeUndefined();
     });
   });
 
   // ============================================================
-  // M-2: MCP GET /tools Requires Authentication
+  // M-2: Legacy /mcp/tools endpoint disabled by default
   // ============================================================
-  describe('M-2: MCP GET /tools Requires Authentication', () => {
-    it('should return 401 when no auth is provided', async () => {
+  describe('M-2: Legacy GET /mcp/tools endpoint policy', () => {
+    it('should return 410 when no auth is provided', async () => {
       const response = await app.request('/mcp/tools', { method: 'GET' });
 
-      expect(response.status).toBe(401);
+      expect(response.status).toBe(410);
       const body = await response.json();
-      expect(body.error).toContain('Authentication required');
+      expect(body.error.code).toBe('LEGACY_ENDPOINT_DISABLED');
     });
 
-    it('should return tool list when authenticated', async () => {
+    it('should return 410 when authenticated', async () => {
       const headers = createTestAuthHeaders(testUser);
       const response = await app.request('/mcp/tools', {
         method: 'GET',
         headers,
       });
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(410);
       const body = await response.json();
-      expect(body.tools).toBeInstanceOf(Array);
-      expect(body.tools.length).toBeGreaterThan(0);
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('LEGACY_ENDPOINT_DISABLED');
     });
   });
 

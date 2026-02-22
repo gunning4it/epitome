@@ -4,265 +4,130 @@ Model Context Protocol server implementation for Epitome.
 
 ## Architecture
 
-The MCP server is integrated into the Hono API server as a set of routes at `/mcp/*`. This design:
+The MCP server is integrated into the Hono API server at `/mcp`. This design:
 
-- Shares the same process and database connection pool as the REST API
-- Enforces consent rules on every tool invocation
-- Logs all tool calls to the audit trail
-- Supports both API key authentication and OAuth 2.0 discovery
+- Shares process/runtime and DB pool with the REST API
+- Enforces consent on every tool invocation
+- Logs tool calls to per-user audit trails
+- Supports API-key auth and OAuth 2.0 discovery flows
 
-## Endpoints
+## Protocol Endpoint
 
-### GET /mcp/tools
+### POST /mcp
 
-List all available tools with their schemas.
+Use MCP JSON-RPC 2.0 messages over Streamable HTTP. Supported method flow:
 
-**Response:**
-```json
-{
-  "tools": [
-    {
-      "name": "recall",
-      "description": "Retrieve information Epitome knows about a topic...",
-      "inputSchema": { ... }
-    },
-    ...
-  ]
-}
+1. `initialize`
+2. `tools/list`
+3. `tools/call`
+
+The only canonical public tools are:
+
+- `recall`
+- `memorize`
+- `review`
+
+### Legacy compatibility endpoints
+
+Legacy REST endpoints are disabled by default:
+
+- `GET /mcp/tools`
+- `POST /mcp/call/:toolName`
+
+Opt-in compatibility flags:
+
+- `MCP_ENABLE_LEGACY_REST_ENDPOINTS=true`
+- `MCP_ENABLE_LEGACY_TOOL_TRANSLATION=true` (for legacy tool names like `list_tables`)
+
+## MCP Request Examples
+
+```bash
+# initialize
+curl -X POST http://localhost:3000/mcp \
+  -H "Authorization: Bearer epi_..." \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":1,
+    "method":"initialize",
+    "params":{
+      "protocolVersion":"2025-03-26",
+      "capabilities":{},
+      "clientInfo":{"name":"local-client","version":"1.0.0"}
+    }
+  }'
+
+# list tools
+curl -X POST http://localhost:3000/mcp \
+  -H "Authorization: Bearer epi_..." \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":2,
+    "method":"tools/list",
+    "params":{}
+  }'
+
+# call recall
+curl -X POST http://localhost:3000/mcp \
+  -H "Authorization: Bearer epi_..." \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":3,
+    "method":"tools/call",
+    "params":{
+      "name":"recall",
+      "arguments":{"topic":"food preferences","budget":"medium"}
+    }
+  }'
 ```
-
-### POST /mcp/call/:toolName
-
-Execute a specific MCP tool.
-
-**Headers:**
-- `Authorization: Bearer epi_...` (required) - API key
-- `X-Agent-ID: claude` (optional) - Agent identifier
-
-**Request Body:**
-```json
-{
-  "arg1": "value1",
-  "arg2": "value2"
-}
-```
-
-**Response (Success):**
-```json
-{
-  "success": true,
-  "result": { ... }
-}
-```
-
-**Response (Error):**
-```json
-{
-  "success": false,
-  "error": {
-    "code": "CONSENT_DENIED",
-    "message": "Agent 'claude' does not have write access to tables/meals"
-  }
-}
-```
-
-### GET /.well-known/oauth-authorization-server
-
-OAuth 2.0 authorization server metadata for AI platforms that support MCP OAuth.
 
 ## The 3 MCP Tools
 
-Epitome exposes 3 intent-based facade tools that internally delegate to the appropriate service-layer functions. This keeps the tool surface small and easy for agents to reason about.
+### 1. `recall`
 
-### 1. recall
+Retrieve information from profile/tables/vectors/graph with optional routing mode.
 
-**Purpose:** Retrieve information from all data sources.
+### 2. `memorize`
 
-**Arguments:**
-- `topic` (optional): What to search for. Empty = general context at conversation start.
-- `budget` (optional): `"small"` | `"medium"` | `"deep"` — retrieval depth.
-- `mode` (optional): `"context"` | `"knowledge"` | `"memory"` | `"graph"` | `"table"` — explicit routing.
-- `memory` (optional): For mode `"memory"` — `{ collection, query, minSimilarity?, limit? }`
-- `graph` (optional): For mode `"graph"` — `{ queryType, entityId?, relation?, maxHops?, pattern? }`
-- `table` (optional): For mode `"table"` — `{ table?, filters?, sql?, limit?, offset? }`
+Save or delete user knowledge. Routes to profile/table/vector paths based on args.
 
-**Default behavior (no mode):**
-- No topic → loads user context (profile, tables, collections, entities, hints)
-- With topic → federated search across all sources with fusion ranking
+### 3. `review`
 
-**Advanced modes:**
-- `mode:"memory"` → collection-specific vector search (requires `memory` object)
-- `mode:"graph"` → graph traversal or pattern matching (requires `graph` object)
-- `mode:"table"` → sandboxed SQL or filter-based table query (requires `table` object)
-
-**Consent Required:** Depends on routing — `profile:read`, `tables:read`, `vectors:read`, or `graph:read`
-
-**Examples:**
-```bash
-# Load user context at conversation start
-curl -X POST http://localhost:3000/mcp/call/recall \
-  -H "Authorization: Bearer epi_..." \
-  -H "Content-Type: application/json" \
-  -d '{}'
-
-# Federated search for a topic
-curl -X POST http://localhost:3000/mcp/call/recall \
-  -H "Authorization: Bearer epi_..." \
-  -H "Content-Type: application/json" \
-  -d '{"topic": "food preferences"}'
-
-# Direct vector search
-curl -X POST http://localhost:3000/mcp/call/recall \
-  -H "Authorization: Bearer epi_..." \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "memory", "memory": {"collection": "journal", "query": "coffee"}}'
-
-# SQL query against a specific table
-curl -X POST http://localhost:3000/mcp/call/recall \
-  -H "Authorization: Bearer epi_..." \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "table", "table": {"table": "meals", "sql": "SELECT * FROM meals WHERE calories > 500 LIMIT 10"}}'
-```
-
-### 2. memorize
-
-**Purpose:** Save or delete a fact, experience, or event.
-
-**Arguments:**
-- `text` (required): The fact/experience to save or forget.
-- `category` (optional): Organizer — `"books"`, `"meals"`, `"profile"`, etc.
-- `data` (optional): Structured fields (e.g., `{title: "Dune", rating: 5}`)
-- `action` (optional): `"save"` (default) or `"delete"`
-- `storage` (optional): `"record"` (default) or `"memory"` — `"memory"` = vector-only save.
-- `collection` (optional): For `storage:"memory"` — vector collection name. Defaults to category.
-- `metadata` (optional): For `storage:"memory"` — optional metadata. Defaults to data.
-
-**Routing order:**
-1. Validate text (empty → INVALID_ARGS)
-2. `action:"delete"` → semantic search + soft-delete matching vectors
-3. `storage:"memory"` → vector-only save via saveMemory
-4. `category:"profile"` → deep-merge profile update
-5. Default → addRecord (dual-writes table row + auto-vectorized memory)
-
-**Consent Required:** `tables:write`, `vectors:write`, or `profile:write` (depends on route)
-
-**Side Effects:**
-- Auto-creates tables/columns for new data
-- Triggers async entity extraction (non-blocking)
-- Checks for contradictions after save
-
-**Examples:**
-```bash
-# Save a structured record
-curl -X POST http://localhost:3000/mcp/call/memorize \
-  -H "Authorization: Bearer epi_..." \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Finished reading Dune", "category": "books", "data": {"title": "Dune", "rating": 5}}'
-
-# Save a journal entry (vector-only)
-curl -X POST http://localhost:3000/mcp/call/memorize \
-  -H "Authorization: Bearer epi_..." \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Had a wonderful sunset walk today", "storage": "memory", "collection": "journal"}'
-
-# Update profile
-curl -X POST http://localhost:3000/mcp/call/memorize \
-  -H "Authorization: Bearer epi_..." \
-  -H "Content-Type: application/json" \
-  -d '{"text": "I am vegetarian", "category": "profile", "data": {"dietary": ["vegetarian"]}}'
-```
-
-### 3. review
-
-**Purpose:** Check for or resolve memory contradictions.
-
-**Arguments:**
-- `action` (required): `"list"` or `"resolve"`
-- `metaId` (optional): For resolve — ID of memory_meta entry
-- `resolution` (optional): `"confirm"` | `"reject"` | `"keep_both"`
-
-**Returns:**
-- For list: Array of contradictions (max 5)
-- For resolve: Success confirmation
-
-**Consent Required:**
-- List: `memory:read`
-- Resolve: `memory:write`
-
-**Example:**
-```bash
-curl -X POST http://localhost:3000/mcp/call/review \
-  -H "Authorization: Bearer epi_..." \
-  -H "Content-Type: application/json" \
-  -d '{"action": "list"}'
-```
+List/resolve memory contradictions and quality-review items.
 
 ## Authentication Flow
 
 1. User generates API key in dashboard
-2. User configures AI agent with:
-   - MCP URL: `http://localhost:3000/mcp`
-   - API Key: `epi_...`
-3. Agent sends requests with `Authorization: Bearer epi_...`
-4. Server validates API key → resolves user ID → sets search_path
-5. Each tool call checks consent_rules for the agent
+2. Agent configures MCP URL: `http://localhost:3000/mcp`
+3. Agent sends `Authorization: Bearer epi_...`
+4. Server resolves user + agent context
+5. Tool call executes only if consent is granted
 
 ## Consent Enforcement
 
 Every MCP tool invocation:
-1. Extracts agent ID from request
-2. Checks consent_rules table for permission
-3. Most specific rule wins (e.g., `tables/meals` beats `tables/*`)
-4. No rule = deny by default
-5. Logs permission check to audit_log
+
+1. Resolves `userId` + `agentId`
+2. Checks `consent_rules`
+3. Applies most-specific grant precedence
+4. Denies by default if no grant exists
+5. Audits invocation in `audit_log`
 
 ## Error Codes
 
 - `UNAUTHORIZED` (401): Missing/invalid API key
-- `CONSENT_DENIED` (403): Agent lacks required permission
-- `NOT_FOUND` (404): Tool not found
-- `INVALID_ARGS` (400): Missing or invalid arguments
-- `RATE_LIMITED` (429): Rate limit exceeded
+- `CONSENT_DENIED` (403): Missing required grant
+- `TOOL_NOT_FOUND` (protocol error / isError result): Unknown tool name
+- `INVALID_ARGS` (400): Invalid tool arguments
+- `RATE_LIMITED` (429): Rate limits exceeded
 - `INTERNAL_ERROR` (500): Server error
-
-## System Prompt Template
-
-Provide this to users for configuring their AI:
-
-```
-I have Epitome connected with my personal data, including a profile,
-data tables, semantic memories, and a knowledge graph of my preferences
-and relationships. At the start of conversations, call recall() with no
-arguments to load my profile and understand what data I track. When I share
-new personal info, save it with memorize(). When I ask about patterns,
-relationships, or history, use recall() with a topic or specific mode.
-If something I say contradicts what you know about me, note it — Epitome
-handles conflicts automatically via review().
-```
-
-## Development
-
-### Testing Locally
-
-```bash
-# List tools
-curl http://localhost:3000/mcp/tools
-
-# Load user context
-curl -X POST http://localhost:3000/mcp/call/recall \
-  -H "Authorization: Bearer epi_..." \
-  -H "Content-Type: application/json" \
-  -d '{}'
-
-# Save a memory
-curl -X POST http://localhost:3000/mcp/call/memorize \
-  -H "Authorization: Bearer epi_..." \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Had pizza for dinner", "category": "meals", "data": {"food": "pizza", "calories": 800}}'
-```
 
 ## References
 
-- EPITOME_TECH_SPEC.md §8 - MCP Server Design
-- EPITOME_TECH_SPEC.md §11 - Sequence Diagrams
-- .claude/skills/mcp-server/SKILL.md - Implementation guide
+- `EPITOME_TECH_SPEC.md` — MCP architecture and sequence docs
+- `.claude/skills/mcp-server/SKILL.md` — implementation guidance

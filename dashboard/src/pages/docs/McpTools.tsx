@@ -40,6 +40,11 @@ export default function McpTools() {
         consent grants before executing any tool.
       </p>
       <p className="text-muted-foreground mb-4">
+        Tool invocation is protocol-native via JSON-RPC methods on <code className="text-xs">POST /mcp</code>{' '}
+        (<code className="text-xs">initialize</code>, <code className="text-xs">tools/list</code>, <code className="text-xs">tools/call</code>).
+        Legacy REST compatibility endpoints are disabled by default.
+      </p>
+      <p className="text-muted-foreground mb-4">
         If an agent calls a tool for a resource it has not been granted consent to access,
         the server returns a consent-required error with instructions for the user to grant
         permission via the dashboard.

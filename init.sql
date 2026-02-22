@@ -814,7 +814,8 @@ BEGIN
                     'all_consent_revoked','revoke_all_consent',
                     'mcp_get_user_context','mcp_save_memory','mcp_search_memory',
                     'mcp_query_graph','mcp_query_table','mcp_add_record',
-                    'mcp_list_tables','mcp_update_profile','mcp_review_memories'
+                    'mcp_list_tables','mcp_update_profile','mcp_review_memories',
+                    'mcp_recall','mcp_memorize','mcp_review'
                   )),
     resource    VARCHAR(200) NOT NULL,
     details     JSONB NOT NULL DEFAULT '{}',

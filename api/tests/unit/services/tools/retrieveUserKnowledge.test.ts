@@ -199,7 +199,7 @@ describe('retrieveUserKnowledge service', () => {
 
     expect(logAuditEntry).toHaveBeenCalledWith('user-123', {
       agentId: 'test-agent',
-      action: 'mcp_retrieve_user_knowledge',
+      action: 'mcp_recall',
       resource: 'profile',
       details: { topic: 'sushi', budget: 'small' },
     });

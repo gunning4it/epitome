@@ -195,7 +195,16 @@ export async function createTestUser(embeddingDim: number = 1536): Promise<TestU
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       agent_id TEXT NOT NULL,
       agent_name TEXT,
-      action TEXT NOT NULL,
+      action VARCHAR(20) NOT NULL CHECK (action IN (
+        'read','write','update','delete','search','query',
+        'graph_query','profile_read','profile_write','write_pipeline',
+        'consent_check','consent_granted','consent_revoked',
+        'all_consent_revoked','revoke_all_consent',
+        'mcp_get_user_context','mcp_save_memory','mcp_search_memory',
+        'mcp_query_graph','mcp_query_table','mcp_add_record',
+        'mcp_list_tables','mcp_update_profile','mcp_review_memories',
+        'mcp_recall','mcp_memorize','mcp_review'
+      )),
       resource TEXT NOT NULL,
       details JSONB DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
