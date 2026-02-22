@@ -48,6 +48,12 @@ const SecurityCompliance = lazy(() => import('@/pages/legal/SecurityCompliance')
 const CookiePolicy = lazy(() => import('@/pages/legal/CookiePolicy'));
 const CcpaPolicy = lazy(() => import('@/pages/legal/CcpaPolicy'));
 
+// Comparison pages — lazy loaded
+const Comparison = lazy(() => import('@/pages/Comparison'));
+const ComparisonMem0 = lazy(() => import('@/pages/comparison/ComparisonMem0'));
+const ComparisonSupermemory = lazy(() => import('@/pages/comparison/ComparisonSupermemory'));
+const ComparisonVertexrag = lazy(() => import('@/pages/comparison/ComparisonVertexrag'));
+
 function LoadingSpinner() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
@@ -107,6 +113,12 @@ export default function AppRoutes() {
         <Route path="cookies" element={<CookiePolicy />} />
         <Route path="ccpa" element={<CcpaPolicy />} />
       </Route>
+
+      {/* Comparison pages */}
+      <Route path="/comparison" element={<Suspense fallback={<LoadingSpinner />}><Comparison /></Suspense>} />
+      <Route path="/comparison/mem0" element={<Suspense fallback={<LoadingSpinner />}><ComparisonMem0 /></Suspense>} />
+      <Route path="/comparison/supermemory" element={<Suspense fallback={<LoadingSpinner />}><ComparisonSupermemory /></Suspense>} />
+      <Route path="/comparison/vertexrag" element={<Suspense fallback={<LoadingSpinner />}><ComparisonVertexrag /></Suspense>} />
 
       {/* Auth-gated dashboard routes */}
       <Route element={<AuthGuard><DashboardLayout /></AuthGuard>}>

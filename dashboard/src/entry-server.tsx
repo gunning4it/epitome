@@ -27,6 +27,11 @@ import SecurityCompliance from '@/pages/legal/SecurityCompliance';
 import CookiePolicy from '@/pages/legal/CookiePolicy';
 import CcpaPolicy from '@/pages/legal/CcpaPolicy';
 
+import Comparison from '@/pages/Comparison';
+import ComparisonMem0 from '@/pages/comparison/ComparisonMem0';
+import ComparisonSupermemory from '@/pages/comparison/ComparisonSupermemory';
+import ComparisonVertexrag from '@/pages/comparison/ComparisonVertexrag';
+
 import { Routes, Route, Navigate } from 'react-router-dom';
 
 // Public-only routes for SSR — no auth-gated routes, no lazy loading
@@ -58,6 +63,10 @@ function PublicRoutes() {
         <Route path="cookies" element={<CookiePolicy />} />
         <Route path="ccpa" element={<CcpaPolicy />} />
       </Route>
+      <Route path="/comparison" element={<Comparison />} />
+      <Route path="/comparison/mem0" element={<ComparisonMem0 />} />
+      <Route path="/comparison/supermemory" element={<ComparisonSupermemory />} />
+      <Route path="/comparison/vertexrag" element={<ComparisonVertexrag />} />
     </Routes>
   );
 }

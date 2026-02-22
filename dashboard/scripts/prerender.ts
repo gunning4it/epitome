@@ -33,6 +33,10 @@ const PUBLIC_ROUTES = [
   '/docs/security',
   '/docs/contributing',
   '/docs/troubleshooting',
+  '/comparison',
+  '/comparison/mem0',
+  '/comparison/supermemory',
+  '/comparison/vertexrag',
 ];
 
 /** Per-route metadata for <head> injection. */
@@ -96,6 +100,22 @@ const ROUTE_META: Record<string, { title: string; description: string }> = {
   '/docs/troubleshooting': {
     title: 'Troubleshooting — Epitome Docs',
     description: 'Common issues, FAQ, and debugging tips.',
+  },
+  '/comparison': {
+    title: 'Compare Epitome — AI Memory Alternatives | Mem0, Supermemory, Vertex RAG',
+    description: 'See how Epitome\u2019s open-source AI memory vault compares to Mem0, Supermemory, and Vertex AI RAG. Feature-by-feature comparison of memory architecture, knowledge graph, privacy, and pricing.',
+  },
+  '/comparison/mem0': {
+    title: 'Epitome vs Mem0 — AI Memory Platform Comparison 2026',
+    description: 'Epitome vs Mem0 vs Supermemory compared. Self-hosted knowledge graph vs managed memory SaaS. Schema isolation, MCP tools, consent system, and pricing analyzed side by side.',
+  },
+  '/comparison/supermemory': {
+    title: 'Epitome vs Supermemory — Personal AI Memory Compared 2026',
+    description: 'Epitome vs Supermemory vs Vertex AI RAG compared. Structured identity layer vs bookmark memory vs enterprise RAG. Architecture, agent support, and self-hosting compared.',
+  },
+  '/comparison/vertexrag': {
+    title: 'Epitome vs Vertex AI RAG — Memory Vault vs Enterprise RAG 2026',
+    description: 'Epitome vs Vertex AI RAG vs Mem0 compared. Personal memory vault with confidence scoring vs enterprise document retrieval. Privacy, cost, and vendor independence analyzed.',
   },
 };
 
