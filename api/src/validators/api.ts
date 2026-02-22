@@ -27,6 +27,13 @@ export const profileHistoryQuerySchema = z.object({
 }).strict();
 
 /**
+ * Profile context query params
+ */
+export const profileContextQuerySchema = z.object({
+  topic: z.string().min(1).max(500).optional(),
+}).strict();
+
+/**
  * Table name path parameter
  */
 export const tableNameSchema = z.object({
@@ -173,6 +180,7 @@ export const memoryRouterSettingsPatchSchema = z.object({
 // Type exports
 export type PatchProfileBody = z.infer<typeof patchProfileSchema>;
 export type ProfileHistoryQuery = z.infer<typeof profileHistoryQuerySchema>;
+export type ProfileContextQuery = z.infer<typeof profileContextQuerySchema>;
 export type TableNameParam = z.infer<typeof tableNameSchema>;
 export type TableRecordBody = z.infer<typeof tableRecordSchema>;
 export type TableQueryBody = z.infer<typeof tableQuerySchema>;

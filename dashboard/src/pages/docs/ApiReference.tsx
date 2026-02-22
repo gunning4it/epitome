@@ -28,6 +28,11 @@ export default function ApiReference() {
         <code className="text-foreground bg-muted px-1 rounded ml-1">https://epitome.fyi/v1</code> for the hosted service,
         or <code className="text-foreground bg-muted px-1 rounded ml-1">http://localhost:3000/v1</code> for self-hosted instances.
       </p>
+      <p className="text-muted-foreground mb-6">
+        For most builders, the recommended integration path is the
+        <a href="/docs/javascript-sdk" className="text-blue-400 hover:underline ml-1">JavaScript SDK</a>,
+        which wraps these endpoints and handles auth headers, body envelopes, and typed responses.
+      </p>
 
       {/* Authentication */}
       <h2 id="authentication" className="text-xl font-semibold mt-10 mb-4">Authentication</h2>
@@ -83,6 +88,42 @@ export default function ApiReference() {
     "name": "Alice Chen",
     "timezone": "America/Los_Angeles",
     ...
+  }
+}`}
+        />
+      </EndpointBlock>
+
+      <EndpointBlock
+        method="GET"
+        path="/v1/profile/context"
+        description="Retrieve structured context (profile, tables, collections, top entities, and recent memories). Supports optional topic query for targeted retrieval."
+        auth="API Key only"
+      >
+        <CodeBlock
+          language="bash"
+          code={`curl -H "X-API-Key: epi_live_abc123..." \\
+  "https://epitome.fyi/v1/profile/context?topic=project%20priorities"`}
+        />
+        <CodeBlock
+          language="json"
+          code={`// Response
+{
+  "data": {
+    "profile": { ... },
+    "tables": [{ "name": "projects", "recordCount": 12 }],
+    "collections": [{ "name": "memories", "entryCount": 89 }],
+    "topEntities": [{ "type": "project", "name": "Epitome SDK" }],
+    "recentMemories": [...],
+    "hints": {
+      "hasStructuredData": true,
+      "hasMemories": true,
+      "hasGraphData": true,
+      "suggestedTools": ["queryTable", "searchMemory", "queryGraph"]
+    }
+  },
+  "meta": {
+    "message": "Context assembled",
+    "warnings": []
   }
 }`}
         />

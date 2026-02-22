@@ -8,6 +8,8 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import type { HonoEnv } from '@/types/hono';
 import { requireAuth } from '@/middleware/auth';
+import { buildToolContext } from '@/services/tools/context';
+import { getUserContext } from '@/services/tools/getUserContext';
 import {
   getLatestProfile,
   getProfileHistory,
@@ -18,6 +20,7 @@ import { requireConsent } from '@/services/consent.service';
 import { logAuditEntry } from '@/services/audit.service';
 import {
   patchProfileSchema,
+  profileContextQuerySchema,
   profileHistoryQuerySchema,
 } from '@/validators/api';
 
@@ -73,6 +76,78 @@ profile.get('/', requireAuth, async (c) => {
     meta: {},
   });
 });
+
+/**
+ * GET /v1/profile/context
+ *
+ * Retrieve aggregated user context for SDK usage.
+ * API-key auth only (session auth is intentionally rejected).
+ */
+profile.get(
+  '/context',
+  requireAuth,
+  zValidator('query', profileContextQuerySchema),
+  async (c) => {
+    const userId = c.get('userId') as string;
+    const agentId = String(c.get('agentId') || 'unknown-agent');
+    const authType = c.get('authType');
+    const tier = String(c.get('tier') || 'free');
+    const { topic } = c.req.valid('query');
+
+    // Keep semantics deterministic for SDK integrations.
+    if (authType === 'session') {
+      return c.json(
+        {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'This endpoint requires API key authentication',
+          },
+        },
+        403
+      );
+    }
+
+    const toolContext = buildToolContext({
+      userId,
+      agentId,
+      tier,
+      authType: 'api_key',
+    });
+
+    const contextResult = await getUserContext({ topic }, toolContext);
+    if (!contextResult.success) {
+      const status = contextResult.code === 'CONSENT_DENIED'
+        ? 403
+        : contextResult.code === 'INVALID_ARGS'
+          ? 400
+          : contextResult.code === 'NOT_FOUND'
+            ? 404
+            : contextResult.code === 'RATE_LIMITED'
+              ? 429
+              : 500;
+
+      return c.json(
+        {
+          error: {
+            code: contextResult.code,
+            message: contextResult.message,
+          },
+        },
+        status
+      );
+    }
+
+    return c.json({
+      data: contextResult.data,
+      meta: {
+        message: contextResult.message,
+        ...(contextResult.meta?.warnings
+          ? { warnings: contextResult.meta.warnings }
+          : {}),
+      },
+    });
+  }
+);
 
 /**
  * PATCH /v1/profile

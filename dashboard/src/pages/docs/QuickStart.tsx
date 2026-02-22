@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 const headings = [
   { id: 'prerequisites', text: 'Prerequisites', level: 2 },
   { id: 'hosted-setup', text: 'Hosted Setup', level: 2 },
+  { id: 'javascript-sdk', text: 'Use the JavaScript SDK', level: 2 },
   { id: 'self-hosted-setup', text: 'Self-Hosted Setup', level: 2 },
   { id: 'connect-agent', text: 'Connect Your First Agent', level: 2 },
   { id: 'system-prompt', text: 'System Prompt Template', level: 2 },
@@ -61,6 +62,23 @@ export default function QuickStart() {
         Already have an OpenAI or Anthropic app and want minimal integration changes? Use the{' '}
         <a href="/docs/memory-router" className="text-blue-400 hover:underline">Memory Router</a>{' '}
         to proxy model calls through Epitome and enable memory without switching to MCP first.
+      </p>
+
+      <h2 id="javascript-sdk" className="text-xl font-semibold mt-10 mb-4">Use the JavaScript SDK</h2>
+      <p className="text-muted-foreground mb-4">
+        Building a server app, agent backend, or workflow automation? Use the official SDK package:
+      </p>
+      <CodeBlock
+        language="bash"
+        code={`npm install @epitomefyi/sdk`}
+      />
+      <p className="text-muted-foreground mt-4 mb-4">
+        Then initialize a client with your API key and call methods like
+        <code className="text-foreground bg-muted px-1 rounded mx-1">saveMemory</code>,
+        <code className="text-foreground bg-muted px-1 rounded mx-1">searchMemory</code>, and
+        <code className="text-foreground bg-muted px-1 rounded mx-1">getUserContext</code>.
+        See <a href="/docs/javascript-sdk" className="text-blue-400 hover:underline">JavaScript SDK</a> and{' '}
+        <a href="/docs/javascript-sdk-ai-tools" className="text-blue-400 hover:underline">AI SDK Tools</a> for full examples.
       </p>
 
       <h2 id="self-hosted-setup" className="text-xl font-semibold mt-10 mb-4">Self-Hosted Setup</h2>

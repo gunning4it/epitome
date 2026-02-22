@@ -29,6 +29,13 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'SDKs',
+    items: [
+      { path: '/docs/javascript-sdk', title: 'JavaScript SDK' },
+      { path: '/docs/javascript-sdk-ai-tools', title: 'AI SDK Tools' },
+    ],
+  },
+  {
     label: 'Self-Hosting',
     items: [
       { path: '/docs/self-hosting', title: 'Self-Hosting Guide' },
