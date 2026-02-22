@@ -2,11 +2,19 @@ import { describe, it, expect } from 'vitest';
 import { rewriteLegacyJsonRpc, translateLegacyToolCall } from '@/mcp/legacyTranslator';
 
 describe('translateLegacyToolCall', () => {
-  it('translates get_user_context to recall context mode', () => {
+  it('translates get_user_context with topic to recall knowledge mode', () => {
     const translated = translateLegacyToolCall('get_user_context', { topic: 'food' });
     expect(translated).toEqual({
       toolName: 'recall',
-      args: { mode: 'context', topic: 'food' },
+      args: { mode: 'knowledge', topic: 'food' },
+    });
+  });
+
+  it('translates get_user_context without topic to recall context mode', () => {
+    const translated = translateLegacyToolCall('get_user_context', {});
+    expect(translated).toEqual({
+      toolName: 'recall',
+      args: { mode: 'context' },
     });
   });
 
@@ -220,7 +228,7 @@ describe('rewriteLegacyJsonRpc', () => {
     const output = rewriteLegacyJsonRpc(batch) as any[];
 
     expect(output[0].params.name).toBe('recall');
-    expect(output[0].params.arguments).toEqual({ mode: 'context', topic: 'food' });
+    expect(output[0].params.arguments).toEqual({ mode: 'knowledge', topic: 'food' });
     expect(output[1]).toEqual(batch[1]);
     expect(output[2]).toEqual(batch[2]);
   });

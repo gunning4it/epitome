@@ -85,12 +85,16 @@ export function translateLegacyToolCall(
 
   switch (toolName) {
     case 'get_user_context': {
+      const topic = isNonEmptyString(safeArgs.topic) ? safeArgs.topic.trim() : undefined;
       return {
         toolName: 'recall',
-        args: compactObject({
-          mode: 'context',
-          topic: safeArgs.topic,
-        }),
+        args: topic
+          ? compactObject({
+              mode: 'knowledge',
+              topic,
+              budget: safeArgs.budget,
+            })
+          : { mode: 'context' },
       };
     }
 

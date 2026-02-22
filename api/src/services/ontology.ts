@@ -77,6 +77,23 @@ export const EDGE_RELATIONS = [
 export type EdgeRelation = (typeof EDGE_RELATIONS)[number];
 // NO `| string` — unknown relations go through quarantine
 
+const EDGE_RELATION_ALIASES: Record<string, EdgeRelation> = {
+  child_of: 'family_member',
+  read_by: 'interested_in',
+  performed_by: 'attended',
+  author_of: 'related_to',
+  birth_of: 'related_to',
+};
+
+/**
+ * Normalize relation aliases to canonical ontology relations.
+ * Unknown values pass through unchanged and can still be quarantined by validateEdge().
+ */
+export function normalizeEdgeRelation(relation: string): string {
+  const normalized = relation.trim().toLowerCase();
+  return EDGE_RELATION_ALIASES[normalized] ?? normalized;
+}
+
 // =====================================================
 // ALLOWED RELATION MATRIX
 // =====================================================
