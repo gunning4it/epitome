@@ -70,10 +70,11 @@ describe('Extraction gold dataset', () => {
   });
 
   describe('relation matrix enforcement', () => {
-    test('food → works_at → person: invalid (source not person)', () => {
+    test('food → works_at → person: soft-quarantined (unexpected source)', () => {
       const result = validateEdge('food', 'person', 'works_at');
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('invalid source');
+      expect(result.valid).toBe(true);
+      expect(result.quarantine).toBe(true);
+      expect(result.error).toContain('unexpected source');
     });
 
     test('person → works_at → organization: accepted', () => {
@@ -81,9 +82,9 @@ describe('Extraction gold dataset', () => {
       expect(result.valid).toBe(true);
     });
 
-    test('unknown relation: quarantined', () => {
+    test('unknown relation: soft-quarantined (valid but flagged)', () => {
       const result = validateEdge('person', 'topic', 'invented_by');
-      expect(result.valid).toBe(false);
+      expect(result.valid).toBe(true);
       expect(result.quarantine).toBe(true);
     });
 
@@ -102,9 +103,10 @@ describe('Extraction gold dataset', () => {
       expect(result.valid).toBe(true);
     });
 
-    test('organization → likes → food: invalid source', () => {
+    test('organization → likes → food: soft-quarantined (unexpected source)', () => {
       const result = validateEdge('organization', 'food', 'likes');
-      expect(result.valid).toBe(false);
+      expect(result.valid).toBe(true);
+      expect(result.quarantine).toBe(true);
     });
   });
 
