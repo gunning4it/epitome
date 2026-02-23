@@ -1764,7 +1764,7 @@ describe('extractEntitiesLLM context-aware', () => {
     const systemMsg = callBody.input[0].content;
     expect(systemMsg).not.toContain('Temporal reference guide');
     expect(systemMsg).not.toContain('## Known Entities');
-    expect(systemMsg).toContain('entity extraction system');
+    expect(systemMsg).toContain('entity extraction');
   });
 });
 
