@@ -12,7 +12,7 @@
 
 import { withUserSchema, sql as pgSql } from '@/db/client';
 import { createEntity, createEdge, getEntityByName, type CreateEntityInput, type CreateEdgeInput } from './graphService';
-import { ENTITY_TYPES, type EntityType } from './ontology';
+import { ENTITY_TYPES, EDGE_RELATIONS, type EntityType } from './ontology';
 import { checkAndDeduplicateBeforeCreate, type EntityCandidate } from './deduplication';
 import { getLatestProfile } from './profile.service';
 import { softCheckLimit } from './metering.service';
@@ -319,13 +319,33 @@ ${entityLines}`;
 
   prompt += `
 
-## Rules
-1. TEMPORAL: Resolve ALL relative dates to ISO strings. "next month" → "${context.nextMonth}", "yesterday" → "${context.yesterday}", "last Tuesday" → compute from today. Store resolved dates in entity properties as \`resolved_date\` or in edge properties as \`when\`.
-2. DISAMBIGUATION: When a name matches or is close to a known entity, use that exact name and type. Do NOT create a new entity if a match exists.
-3. ENTITY-TO-ENTITY: Use sourceRef when a relationship belongs to another entity, not the user. "Sarah is moving to Portland" → Portland entity with sourceRef pointing to Sarah.
-4. SELECTIVITY: Only extract clear, meaningful entities. Skip vague references, pronouns without antecedents, filler words.
-5. EVENTS: Create event entities for specific occurrences with resolved dates.
-6. Both free text and structured data are valid inputs — extract from either form.`;
+## Rules & Extensibility
+1. TEMPORAL: Resolve ALL relative dates to ISO strings. "next month" → "${context.nextMonth}", "yesterday" → "${context.yesterday}", "last Tuesday" → compute from today. Store resolved dates in properties.
+2. DISAMBIGUATION: When a name matches or is close to a known entity, use that exact name and type to avoid duplicates.
+3. ENTITY-TO-ENTITY: By default, edges originate from the User. Use \`sourceRef\` when a relationship, action, or attribute belongs to a NON-USER entity (a third-party person, organization, object, or event).
+4. UNKNOWN TYPES: If an entity does not cleanly fit standard types (${[...ENTITY_TYPES].filter(t => t !== 'custom').join(', ')}), assign it type "custom" and specify its real category in \`properties: { category: "..." }\` (e.g., "vehicle", "software", "pet", "device").
+5. PREFERRED RELATIONS: Use these standard relations when possible: ${[...EDGE_RELATIONS].join(', ')}. If none fit, invent a clear snake_case relation — it will be routed to quarantine for future promotion.
+6. SELECTIVITY: Only extract clear, meaningful entities. Skip vague references, pronouns without antecedents, and filler words.
+7. EVENTS: Create event entities for specific occurrences with resolved dates.
+
+## Examples (Mapping any use case)
+- [Action/Location] "My colleague Sarah moved to Tokyo"
+  → Place "Tokyo" with sourceRef → Person "Sarah" (relation: "lives_at")
+- [Attribute/Property] "The startup raised $5M"
+  → Topic "funding" with sourceRef → Organization "startup" (relation: "has_attribute"), properties: { value: "$5M" }
+- [Temporal/Event] "The AWS conference is on Oct 1st"
+  → Preference "date" with sourceRef → Event "AWS conference" (relation: "has_attribute"), properties: { value: "2025-10-01" }
+- [Possession/Preference] "Alex loves sushi"
+  → Food "sushi" with sourceRef → Person "Alex" (relation: "likes")
+- [Custom/Unknown Type] "I bought a new Tesla Model 3"
+  → Custom "Tesla Model 3" (relation: "owns"), properties: { category: "vehicle", brand: "Tesla" }
+- [Software/Tools] "We are migrating the backend to Supabase"
+  → Custom "Supabase" (relation: "uses"), properties: { category: "software", type: "database" }
+- [Pets/Animals] "My dog Max needs to go to the vet"
+  → Custom "Max" (relation: "owns"), properties: { category: "pet", species: "dog" }
+- [Medication/Regimen] "Taking 50mg of Zoloft daily"
+  → Medication "Zoloft" (relation: "takes"), properties: { dose: "50mg", frequency: "daily" }
+- General rule: If an attribute (age, date, name, status, location, etc.) or action describes a NON-USER entity, the edge MUST use \`sourceRef\` pointing to that entity. Use relation "has_attribute" for descriptive properties.`;
 
   return prompt;
 }
@@ -1272,22 +1292,32 @@ export async function extractEntitiesLLM(
     userPrompt = buildUserPrompt(tableName, record);
   } else {
     // Legacy generic path (backward compat for tests, batch jobs without userId)
-    systemPrompt = `You are an entity extraction system. Extract entities (people, organizations, places, foods, topics, preferences, events, activities, medications, media) and their relationships from structured data.
+    systemPrompt = `You are a universal entity extraction engine. Extract entities and relationships from structured data or unstructured text.
 
 Return JSON array of entities with this schema:
 [{
   "name": "entity name",
   "type": "${[...ENTITY_TYPES].join('|')}",
-  "properties": { additional metadata },
+  "properties": { additional metadata, use "category" for custom types },
   "edge": {
-    "relation": "likes|dislikes|ate|visited|performed|takes|interested_in|allergic_to|etc",
+    "relation": "likes|dislikes|ate|visited|performed|takes|interested_in|works_at|attended|owns|uses|etc",
     "weight": 1.0,
     "sourceRef": { "name": "entity name", "type": "entity type" } // optional — if set, edge originates from this entity instead of the owner
   }
 }]
 
-By default, edges originate from the owner (user). Use sourceRef when a relationship belongs to another entity (e.g. "wife likes sushi" → sourceRef points to the wife entity, not the user).
-Only extract clear, meaningful entities. Omit generic or unclear data.`;
+## Rules & Extensibility:
+1. By default, edges originate from the owner (user).
+2. Use \`sourceRef\` when a relationship or attribute belongs to another entity, not the user.
+3. If an entity doesn't fit standard types, use type "custom" and set \`properties: { category: "actual_type" }\` (e.g., "vehicle", "software", "pet", "device").
+4. If no standard edge relation fits, invent a logical snake_case relation (e.g., "owns", "uses", "subscribes_to").
+5. Only extract clear, meaningful entities. Omit generic or unclear data.
+
+## Examples:
+- "Alex loves sushi" → Food "sushi" with sourceRef → Person "Alex" (relation: "likes")
+- "I bought a Tesla Model 3" → Custom "Tesla Model 3" (relation: "owns", properties: { category: "vehicle" })
+- "The startup raised $5M" → Topic "funding" with sourceRef → Organization "startup" (relation: "has_attribute", properties: { value: "$5M" })
+- "We use Supabase for the backend" → Custom "Supabase" (relation: "uses", properties: { category: "software" })`;
 
     userPrompt = `Table: ${tableName}
 Data: ${JSON.stringify(record, null, 2)}

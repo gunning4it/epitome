@@ -728,32 +728,33 @@ export async function createEdge(
       normalizedRelation
     );
     if (!validation.valid) {
-      if (validation.quarantine) {
-        await insertEdgeQuarantine(tx, {
-          sourceType: source.type,
-          targetType: target.type,
-          relation: input.relation,
-          sourceName: source.name,
-          targetName: target.name,
-          reason: validation.error || 'Unknown relation',
-          payload: {
-            sourceId: input.sourceId,
-            targetId: input.targetId,
-            normalizedRelation,
-            properties: edgeProperties,
-          },
-        });
-        logger.info('Edge quarantined', {
-          relation: input.relation,
-          normalizedRelation,
-          source: source.name,
-          target: target.name,
-          reason: validation.error,
-        });
-        return null;
-      }
       logger.warn('Edge validation failed', { ...validation, sourceId: input.sourceId, targetId: input.targetId });
       return null;
+    }
+    // Soft quarantine: edge is valid but flagged for review (novel relation or unexpected type combo)
+    if (validation.quarantine) {
+      await insertEdgeQuarantine(tx, {
+        sourceType: source.type,
+        targetType: target.type,
+        relation: input.relation,
+        sourceName: source.name,
+        targetName: target.name,
+        reason: validation.error || 'Novel relation',
+        payload: {
+          sourceId: input.sourceId,
+          targetId: input.targetId,
+          normalizedRelation,
+          properties: edgeProperties,
+        },
+      });
+      logger.info('Edge soft-quarantined (allowed into graph, flagged for review)', {
+        relation: input.relation,
+        normalizedRelation,
+        source: source.name,
+        target: target.name,
+        reason: validation.error,
+      });
+      // Continue — edge will still be created below
     }
 
     if (relationWasNormalized) {
