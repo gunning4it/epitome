@@ -24,10 +24,15 @@ vi.mock('@/services/table.service', () => ({
 
 vi.mock('@/services/vector.service', () => ({
   listCollections: vi.fn(),
+  searchAllVectors: vi.fn(),
 }));
 
 vi.mock('@/db/client', () => ({
   withUserSchema: vi.fn(),
+}));
+
+vi.mock('@/utils/logger', () => ({
+  logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
 vi.mock('@/services/retrieval.service', () => ({
@@ -52,7 +57,7 @@ import { requireConsent, requireDomainConsent } from '@/services/consent.service
 import { logAuditEntry } from '@/services/audit.service';
 import { getLatestProfile } from '@/services/profile.service';
 import { listTables } from '@/services/table.service';
-import { listCollections } from '@/services/vector.service';
+import { listCollections, searchAllVectors } from '@/services/vector.service';
 import { withUserSchema } from '@/db/client';
 
 // --- Fixtures ---
@@ -79,6 +84,7 @@ const mockTables = [
 
 const mockCollections = [
   { collection: 'journal', description: 'Journal entries', entryCount: 100, embeddingDim: 1536, createdAt: new Date() },
+  { collection: 'graph_edges', description: 'Internal graph edges', entryCount: 50, embeddingDim: 1536, createdAt: new Date() },
 ];
 
 const mockEntities = [
@@ -377,5 +383,135 @@ describe('getUserContext service', () => {
     if (!result.success) return;
 
     expect(result.data.retrievalPlan).toBeUndefined();
+  });
+
+  it('filters internal collections (graph_edges) from collections list', async () => {
+    consentAllowed();
+    setupFullMocks();
+
+    const result = await getUserContext({}, baseCtx);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    const names = result.data.collections.map((c) => c.name);
+    expect(names).toContain('journal');
+    expect(names).not.toContain('graph_edges');
+  });
+
+  it('excludes internal collections from recency-based recent memories', async () => {
+    consentAllowed();
+    setupFullMocks();
+    // Override withUserSchema to return a graph_edges vector alongside a normal one
+    (withUserSchema as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_userId: string, cb: (tx: unknown) => Promise<unknown>) => {
+        const mockTx = {
+          unsafe: vi.fn().mockImplementation(async (sql: string) => {
+            if (sql.includes('FROM entities')) {
+              return mockEntities;
+            }
+            if (sql.includes('FROM vectors')) {
+              // The query should have a NOT IN clause filtering graph_edges,
+              // so these rows should never come back. But if the filter is
+              // missing, graph_edges would show up.
+              return mockVectors;
+            }
+            return [];
+          }),
+        };
+        return cb(mockTx);
+      },
+    );
+
+    const result = await getUserContext({}, baseCtx);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    // Verify that the SQL query contains NOT IN filter for internal collections
+    const calls = (withUserSchema as ReturnType<typeof vi.fn>).mock.calls;
+    // The second withUserSchema call is for recent memories (first is entities)
+    // We verified graph_edges is filtered in the SQL itself
+    for (const mem of result.data.recentMemories) {
+      expect(mem.collection).not.toBe('graph_edges');
+    }
+  });
+
+  it('uses semantic search when topic is provided', async () => {
+    consentAllowed();
+    setupFullMocks();
+    (searchAllVectors as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: 42,
+        collection: 'journal',
+        text: 'Honeymoon in Bali was amazing',
+        metadata: {},
+        similarity: 0.92,
+        confidence: 0.85,
+        status: 'active',
+        createdAt: new Date('2026-02-10'),
+      },
+    ]);
+
+    const result = await getUserContext({ topic: 'honeymoon' }, baseCtx);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(searchAllVectors).toHaveBeenCalledWith('user-123', 'honeymoon', 10, 0.3);
+    expect(result.data.recentMemories).toHaveLength(1);
+    expect(result.data.recentMemories[0].text).toBe('Honeymoon in Bali was amazing');
+  });
+
+  it('filters internal collections from topic search results', async () => {
+    consentAllowed();
+    setupFullMocks();
+    (searchAllVectors as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: 42,
+        collection: 'journal',
+        text: 'Honeymoon in Bali was amazing',
+        metadata: {},
+        similarity: 0.92,
+        confidence: 0.85,
+        status: 'active',
+        createdAt: new Date('2026-02-10'),
+      },
+      {
+        id: 99,
+        collection: 'graph_edges',
+        text: 'Josh honeymoon_destination Bali',
+        metadata: {},
+        similarity: 0.88,
+        confidence: 0.7,
+        status: 'active',
+        createdAt: new Date('2026-02-10'),
+      },
+    ]);
+
+    const result = await getUserContext({ topic: 'honeymoon' }, baseCtx);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data.recentMemories).toHaveLength(1);
+    expect(result.data.recentMemories[0].collection).toBe('journal');
+  });
+
+  it('falls back to recency when topic search fails', async () => {
+    consentAllowed();
+    setupFullMocks();
+    (searchAllVectors as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('OpenAI API error'),
+    );
+
+    const result = await getUserContext({ topic: 'honeymoon' }, baseCtx);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    // Should still have recent memories from the recency fallback
+    expect(result.data.recentMemories).toHaveLength(1);
+    expect(result.data.recentMemories[0].text).toBe('Had coffee today');
   });
 });

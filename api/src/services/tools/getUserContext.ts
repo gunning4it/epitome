@@ -16,11 +16,13 @@ import { requireConsent, requireDomainConsent } from '@/services/consent.service
 import { logAuditEntry } from '@/services/audit.service';
 import { getLatestProfile } from '@/services/profile.service';
 import { listTables } from '@/services/table.service';
-import { listCollections } from '@/services/vector.service';
+import { listCollections, searchAllVectors } from '@/services/vector.service';
 import { withUserSchema } from '@/db/client';
 import type { ToolContext, ToolResult } from './types.js';
 import { toolSuccess } from './types.js';
 import { classifyIntent, scoreSourceRelevance, buildRetrievalPlan, type RetrievalPlan } from '@/services/retrieval.service';
+import { INTERNAL_COLLECTIONS } from '@/services/writeIngestion.service';
+import { logger } from '@/utils/logger';
 
 export interface GetUserContextArgs {
   topic?: string;
@@ -203,11 +205,13 @@ export async function getUserContext(
   try {
     await requireDomainConsent(userId, agentId, 'vectors', 'read');
     const raw = await listCollections(userId);
-    collections = raw.map((c) => ({
-      name: c.collection,
-      description: c.description,
-      entryCount: c.entryCount,
-    }));
+    collections = raw
+      .filter((c) => !INTERNAL_COLLECTIONS.has(c.collection))
+      .map((c) => ({
+        name: c.collection,
+        description: c.description,
+        entryCount: c.entryCount,
+      }));
   } catch {
     access.vectors = 'denied';
     warnings.push('No vectors read consent — collections section empty.');
@@ -252,35 +256,66 @@ export async function getUserContext(
   }
 
   // Recent memories/vectors — only if agent has vectors consent
+  // When topic is provided, use semantic search for relevant vectors;
+  // otherwise fall back to recency-based ordering.
+  const internalCollectionsList = [...INTERNAL_COLLECTIONS].map((c) => `'${c}'`).join(', ');
   let recentMemories: RecentMemory[] = [];
   try {
     await requireDomainConsent(userId, agentId, 'vectors', 'read');
-    recentMemories = await withUserSchema(userId, async (tx) => {
-      const result = await tx.unsafe(`
-        SELECT
-          v.id,
-          v.collection,
-          v.text,
-          v.metadata,
-          v.created_at,
-          m.confidence,
-          m.status
-        FROM vectors v
-        LEFT JOIN memory_meta m ON v._meta_id = m.id
-        WHERE v._deleted_at IS NULL
-        ORDER BY v.created_at DESC
-        LIMIT 10
-      `);
 
-      return (result as unknown as VectorRow[]).map((row) => ({
-        collection: row.collection,
-        text: row.text,
-        metadata: row.metadata,
-        confidence: row.confidence,
-        status: row.status,
-        createdAt: row.created_at,
-      }));
-    });
+    if (args.topic) {
+      // Topic-aware: semantic search across all non-internal collections
+      try {
+        const searchResults = await searchAllVectors(userId, args.topic, 10, 0.3);
+        recentMemories = searchResults
+          .filter((r) => !INTERNAL_COLLECTIONS.has(r.collection))
+          .map((r) => ({
+            collection: r.collection,
+            text: r.text,
+            metadata: r.metadata ?? {},
+            confidence: r.confidence,
+            status: r.status,
+            createdAt: r.createdAt,
+          }));
+      } catch (err) {
+        logger.warn('Topic-aware search failed, falling back to recency', {
+          topic: args.topic,
+          error: String(err),
+        });
+        // Fall through to recency-based below
+      }
+    }
+
+    // Recency fallback: no topic, or topic search returned nothing / failed
+    if (recentMemories.length === 0) {
+      recentMemories = await withUserSchema(userId, async (tx) => {
+        const result = await tx.unsafe(`
+          SELECT
+            v.id,
+            v.collection,
+            v.text,
+            v.metadata,
+            v.created_at,
+            m.confidence,
+            m.status
+          FROM vectors v
+          LEFT JOIN memory_meta m ON v._meta_id = m.id
+          WHERE v._deleted_at IS NULL
+            AND v.collection NOT IN (${internalCollectionsList})
+          ORDER BY v.created_at DESC
+          LIMIT 10
+        `);
+
+        return (result as unknown as VectorRow[]).map((row) => ({
+          collection: row.collection,
+          text: row.text,
+          metadata: row.metadata,
+          confidence: row.confidence,
+          status: row.status,
+          createdAt: row.created_at,
+        }));
+      });
+    }
   } catch {
     access.vectors = 'denied';
     warnings.push('No vectors read consent — recentMemories section empty.');

@@ -18,6 +18,7 @@ import {
   recordMentionInternal,
   detectContradictionsInternal,
 } from './memoryQuality.service';
+import { INTERNAL_COLLECTIONS } from './writeIngestion.service';
 import { logger } from '@/utils/logger';
 
 /**
@@ -566,6 +567,7 @@ export async function listVectors(
 export async function listCollections(
   userId: string
 ): Promise<CollectionMetadata[]> {
+  const excludeList = [...INTERNAL_COLLECTIONS].map((c) => `'${c}'`).join(', ');
   return await withUserSchema(userId, async (tx) => {
     const rows = await tx.unsafe<VectorCollectionRow[]>(`
       SELECT
@@ -576,6 +578,7 @@ export async function listCollections(
         created_at,
         updated_at
       FROM _vector_collections
+      WHERE collection NOT IN (${excludeList})
       ORDER BY created_at DESC
     `);
 
@@ -614,10 +617,17 @@ export async function listRecentVectors(
   options: { collection?: string; limit?: number; offset?: number } = {}
 ): Promise<{ vectors: VectorWithMetaRow[]; total: number }> {
   const { collection, limit = 50, offset = 0 } = options;
+  const excludeList = [...INTERNAL_COLLECTIONS].map((c) => `'${c}'`).join(', ');
 
   return await withUserSchema(userId, async (tx) => {
-    const mainFilter = collection ? 'AND v.collection = $3::text' : '';
-    const countFilter = collection ? 'AND v.collection = $1::text' : '';
+    // When browsing all collections, hide internal ones; when a specific
+    // collection is requested, show it even if internal (explicit request).
+    const mainFilter = collection
+      ? 'AND v.collection = $3::text'
+      : `AND v.collection NOT IN (${excludeList})`;
+    const countFilter = collection
+      ? 'AND v.collection = $1::text'
+      : `AND v.collection NOT IN (${excludeList})`;
     const mainParams = collection
       ? [limit, offset, collection]
       : [limit, offset];

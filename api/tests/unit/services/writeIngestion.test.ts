@@ -29,7 +29,7 @@ vi.mock('@/utils/logger', () => ({
   },
 }));
 
-import { ingestMemoryText, ingestProfileUpdate, ingestTableRecord } from '@/services/writeIngestion.service';
+import { ingestMemoryText, ingestProfileUpdate, ingestTableRecord, INTERNAL_COLLECTIONS } from '@/services/writeIngestion.service';
 import { insertRecord } from '@/services/table.service';
 import { updateProfile } from '@/services/profile.service';
 import { addVector } from '@/services/vector.service';
@@ -47,6 +47,10 @@ describe('write ingestion service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     logWritePipelineStageMock.mockResolvedValue();
+  });
+
+  it('INTERNAL_COLLECTIONS contains graph_edges', () => {
+    expect(INTERNAL_COLLECTIONS.has('graph_edges')).toBe(true);
   });
 
   it('keeps profile writes accepted when enrichment enqueue fails', async () => {

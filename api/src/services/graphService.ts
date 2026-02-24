@@ -854,6 +854,7 @@ export async function createEdge(
         meta: meta ?? null,
         _sourceName: source.name,
         _targetName: target.name,
+        _isNew: false as const,
       };
     }
 
@@ -942,12 +943,14 @@ export async function createEdge(
       meta,
       _sourceName: source.name,
       _targetName: target.name,
+      _isNew: true as const,
     };
   });
 
   // Fire-and-forget edge summary vectorization (outside transaction)
-  if (result && getFlag('FEATURE_GRAPH_EDGE_VECTORIZATION')) {
-    const { _sourceName, _targetName, ...edgeData } = result;
+  // Only vectorize NEW edges — reinforcements create near-identical duplicates.
+  if (result && result._isNew && getFlag('FEATURE_GRAPH_EDGE_VECTORIZATION')) {
+    const { _sourceName, _targetName, _isNew, ...edgeData } = result;
     const summaryText = `${_sourceName} ${edgeData.relation} ${_targetName}`;
     void vectorizeEdgeSummary(userId, edgeData.id, summaryText, {
       sourceId: edgeData.sourceId,
@@ -964,7 +967,7 @@ export async function createEdge(
   }
 
   if (result) {
-    const { _sourceName, _targetName, ...edgeData } = result;
+    const { _sourceName, _targetName, _isNew, ...edgeData } = result;
     return edgeData as EdgeWithMeta;
   }
   return result;

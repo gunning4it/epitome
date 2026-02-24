@@ -52,6 +52,14 @@ export const ENRICHMENT_SKIP_COLLECTIONS: ReadonlySet<string> = new Set([
   'graph_edges',
 ]);
 
+/**
+ * Collections that are system-internal and should be hidden from user-facing
+ * surfaces (dashboard, getUserContext, etc.).  Single source of truth.
+ */
+export const INTERNAL_COLLECTIONS: ReadonlySet<string> = new Set([
+  'graph_edges',
+]);
+
 export function shouldSkipEnrichment(collection: string): boolean {
   return ENRICHMENT_SKIP_COLLECTIONS.has(collection);
 }
