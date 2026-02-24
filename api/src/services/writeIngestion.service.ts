@@ -43,6 +43,19 @@ export function createWriteId(): string {
   return randomUUID();
 }
 
+/**
+ * Collections that must never trigger enrichment (entity extraction).
+ * graph_edges vectors are *derived* from the knowledge graph — re-extracting
+ * from them creates a positive feedback loop (edge → vector → extraction → edge → …).
+ */
+export const ENRICHMENT_SKIP_COLLECTIONS: ReadonlySet<string> = new Set([
+  'graph_edges',
+]);
+
+export function shouldSkipEnrichment(collection: string): boolean {
+  return ENRICHMENT_SKIP_COLLECTIONS.has(collection);
+}
+
 const LEDGER_WRITE_ENABLED = process.env.LEDGER_WRITE_ENABLED === 'true';
 
 async function safeCreateKnowledgeClaim(
@@ -419,27 +432,30 @@ export async function ingestMemoryText(params: {
       ],
     });
 
-    const jobId = await safeEnqueueEnrichment({
-      userId: params.userId,
-      sourceType: 'vector',
-      sourceRef,
-      tableName: params.collection,
-      record: {
-        id: vectorId,
-        text: params.text,
-        collection: params.collection,
-        metadata,
-      },
-      pipeline: {
-        writeId,
-        agentId: params.changedBy,
-        resource,
-        sourceRef,
-        vectorId,
-        writeStatus: 'accepted',
-        startedAt,
-      },
-    });
+    // Skip enrichment for derived collections to prevent feedback loops
+    const jobId = shouldSkipEnrichment(params.collection)
+      ? undefined
+      : await safeEnqueueEnrichment({
+          userId: params.userId,
+          sourceType: 'vector',
+          sourceRef,
+          tableName: params.collection,
+          record: {
+            id: vectorId,
+            text: params.text,
+            collection: params.collection,
+            metadata,
+          },
+          pipeline: {
+            writeId,
+            agentId: params.changedBy,
+            resource,
+            sourceRef,
+            vectorId,
+            writeStatus: 'accepted',
+            startedAt,
+          },
+        });
 
     return {
       vectorId,
@@ -595,27 +611,30 @@ export async function ingestMemoryText(params: {
         ],
       });
 
-      const jobId = await safeEnqueueEnrichment({
-        userId: params.userId,
-        sourceType: 'table',
-        sourceRef,
-        tableName: 'memory_backlog',
-        record: {
-          id: backlogRecordId,
-          collection: params.collection,
-          text: params.text,
-          metadata,
-          source_ref_hint: params.sourceRefHint || null,
-        },
-        pipeline: {
-          writeId,
-          agentId: params.changedBy,
-          resource,
-          sourceRef,
-          writeStatus: 'pending_enrichment',
-          startedAt,
-        },
-      });
+      // Skip enrichment for derived collections even in the backlog path
+      const jobId = shouldSkipEnrichment(params.collection)
+        ? undefined
+        : await safeEnqueueEnrichment({
+            userId: params.userId,
+            sourceType: 'table',
+            sourceRef,
+            tableName: 'memory_backlog',
+            record: {
+              id: backlogRecordId,
+              collection: params.collection,
+              text: params.text,
+              metadata,
+              source_ref_hint: params.sourceRefHint || null,
+            },
+            pipeline: {
+              writeId,
+              agentId: params.changedBy,
+              resource,
+              sourceRef,
+              writeStatus: 'pending_enrichment',
+              startedAt,
+            },
+          });
 
       return {
         sourceRef,

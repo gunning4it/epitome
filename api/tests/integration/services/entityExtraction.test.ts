@@ -2082,3 +2082,135 @@ describe('in-law relationship labels (rule-based)', () => {
     expect(jakeOwnerEdge?.edge?.relation).toBe('family_member');
   });
 });
+
+// =====================================================
+// RELATIONSHIP MILESTONES EXTRACTION TESTS
+// =====================================================
+
+describe('relationship milestones extraction (rule-based)', () => {
+  it('should extract event + place entities from milestone array format', () => {
+    const record = {
+      id: 1,
+      relationship_milestones: [
+        {
+          event: 'honeymoon',
+          duration: '1 month',
+          locations: ['Paris', 'Cannes', 'Nice', 'Monaco', 'Mallorca', 'Rome', 'Lucerne', 'Amsterdam', 'London'],
+        },
+      ],
+    };
+
+    const entities = extractEntitiesRuleBased('profile', record);
+
+    // 1 event + 9 places = 10 entities
+    expect(entities).toHaveLength(10);
+
+    // Check event entity
+    const honeymoon = entities.find(e => e.type === 'event' && e.name === 'honeymoon');
+    expect(honeymoon).toBeDefined();
+    expect(honeymoon?.edge?.relation).toBe('experiences');
+    expect(honeymoon?.edge?.weight).toBe(1.0);
+    expect(honeymoon?.properties).toMatchObject({ duration: '1 month' });
+
+    // Check place entities
+    const places = entities.filter(e => e.type === 'place');
+    expect(places).toHaveLength(9);
+    expect(places.map(p => p.name).sort()).toEqual(
+      ['Amsterdam', 'Cannes', 'London', 'Lucerne', 'Mallorca', 'Monaco', 'Nice', 'Paris', 'Rome']
+    );
+
+    // Each place should have located_at edge with sourceRef pointing to the event
+    for (const place of places) {
+      expect(place.edge?.relation).toBe('located_at');
+      expect(place.edge?.weight).toBe(1.0);
+      expect(place.edge?.sourceRef).toMatchObject({ name: 'honeymoon', type: 'event' });
+      expect(place.properties).toMatchObject({ context: 'honeymoon' });
+    }
+  });
+
+  it('should extract milestones from object format', () => {
+    const record = {
+      id: 1,
+      relationship_milestones: {
+        honeymoon: {
+          locations: ['Bali', 'Tokyo'],
+          duration: '2 weeks',
+        },
+        wedding: {
+          locations: ['Napa Valley'],
+        },
+      },
+    };
+
+    const entities = extractEntitiesRuleBased('profile', record);
+
+    // honeymoon event + 2 places + wedding event + 1 place = 5
+    expect(entities).toHaveLength(5);
+
+    const honeymoon = entities.find(e => e.type === 'event' && e.name === 'honeymoon');
+    expect(honeymoon).toBeDefined();
+    expect(honeymoon?.properties).toMatchObject({ duration: '2 weeks' });
+
+    const wedding = entities.find(e => e.type === 'event' && e.name === 'wedding');
+    expect(wedding).toBeDefined();
+    expect(wedding?.edge?.relation).toBe('experiences');
+
+    const napa = entities.find(e => e.name === 'Napa Valley');
+    expect(napa).toBeDefined();
+    expect(napa?.type).toBe('place');
+    expect(napa?.edge?.sourceRef).toMatchObject({ name: 'wedding', type: 'event' });
+  });
+
+  it('should handle milestone without locations', () => {
+    const record = {
+      id: 1,
+      relationship_milestones: [
+        { event: 'proposal', locations: [] },
+      ],
+    };
+
+    const entities = extractEntitiesRuleBased('profile', record);
+
+    // Just the event, no places
+    expect(entities).toHaveLength(1);
+    expect(entities[0].name).toBe('proposal');
+    expect(entities[0].type).toBe('event');
+    expect(entities[0].edge?.relation).toBe('experiences');
+  });
+
+  it('should skip milestones with missing event name', () => {
+    const record = {
+      id: 1,
+      relationship_milestones: [
+        { locations: ['Paris'] },
+        { event: '', locations: ['London'] },
+      ],
+    };
+
+    const entities = extractEntitiesRuleBased('profile', record);
+    // No event entities should be created from milestone handler
+    const events = entities.filter(e => e.type === 'event');
+    expect(events).toHaveLength(0);
+    // No located_at edges from milestone handler (generic may create place entities differently)
+    const locatedAt = entities.filter(e => e.edge?.relation === 'located_at');
+    expect(locatedAt).toHaveLength(0);
+  });
+
+  it('should combine milestones with other profile data', () => {
+    const record = {
+      id: 1,
+      interests: ['photography'],
+      relationship_milestones: [
+        { event: 'honeymoon', locations: ['Paris'] },
+      ],
+    };
+
+    const entities = extractEntitiesRuleBased('profile', record);
+
+    // 1 interest + 1 event + 1 place = 3
+    expect(entities).toHaveLength(3);
+    expect(entities.find(e => e.name === 'photography')).toBeDefined();
+    expect(entities.find(e => e.name === 'honeymoon')).toBeDefined();
+    expect(entities.find(e => e.name === 'Paris')).toBeDefined();
+  });
+});

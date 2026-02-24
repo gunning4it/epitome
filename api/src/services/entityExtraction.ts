@@ -1220,6 +1220,58 @@ const EXTRACTION_RULES: Record<string, (data: Record<string, unknown>) => Extrac
       }
     }
 
+    // Extract relationship milestones → event + place entities
+    if (data.relationship_milestones) {
+      const milestones: Array<{ event?: string; locations?: unknown; duration?: string; [k: string]: unknown }> = [];
+
+      if (Array.isArray(data.relationship_milestones)) {
+        // Array format: [{ event, locations, duration, ... }]
+        for (const m of data.relationship_milestones) {
+          if (m && typeof m === 'object') milestones.push(m as typeof milestones[number]);
+        }
+      } else if (typeof data.relationship_milestones === 'object') {
+        // Object format: { honeymoon: { locations: [...] }, wedding: { ... } }
+        for (const [key, val] of Object.entries(data.relationship_milestones as Record<string, any>)) {
+          if (val && typeof val === 'object' && !Array.isArray(val)) {
+            milestones.push({ event: key, ...val });
+          }
+        }
+      }
+
+      for (const milestone of milestones) {
+        const eventName = typeof milestone.event === 'string' ? milestone.event.trim() : '';
+        if (!eventName) continue;
+
+        const eventProps: Record<string, unknown> = {};
+        if (milestone.duration) eventProps.duration = milestone.duration;
+
+        // Event entity: owner → event via 'experiences'
+        entities.push({
+          name: eventName,
+          type: 'event',
+          properties: eventProps,
+          edge: { relation: 'experiences', weight: 1.0 },
+        });
+
+        // Place entities for each location: event → place via 'located_at'
+        const locations = Array.isArray(milestone.locations) ? milestone.locations : [];
+        for (const loc of locations) {
+          if (typeof loc === 'string' && loc.trim()) {
+            entities.push({
+              name: loc.trim(),
+              type: 'place',
+              properties: { context: eventName },
+              edge: {
+                relation: 'located_at',
+                weight: 1.0,
+                sourceRef: { name: eventName, type: 'event' as EntityType },
+              },
+            });
+          }
+        }
+      }
+    }
+
     return entities;
   },
 };

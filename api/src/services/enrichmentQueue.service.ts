@@ -1,5 +1,6 @@
 import { sql } from '@/db/client';
 import { extractEntitiesFromRecord } from '@/services/entityExtraction';
+import { shouldSkipEnrichment } from '@/services/writeIngestion.service';
 import { logWritePipelineStage } from '@/services/audit.service';
 import { addVector } from '@/services/vector.service';
 import { logger } from '@/utils/logger';
@@ -390,6 +391,16 @@ export async function processEnrichmentJobsBatch(
         throw new Error('INVALID_ARGS: enrichment payload missing tableName');
       }
 
+      // Skip derived collections to prevent feedback loops (drains backlog)
+      if (shouldSkipEnrichment(tableName)) {
+        logger.info('Enrichment job skipped (derived collection)', {
+          jobId: job.id, tableName, userId: job.user_id,
+        });
+        await markEnrichmentJobDone(job.id);
+        processed++;
+        continue;
+      }
+
       await extractEntitiesFromRecord(
         job.user_id,
         tableName,
@@ -483,20 +494,22 @@ export async function processPendingVectorsBatch(
 
       await markPendingVectorDone(row.id, vectorId);
 
-      // Queue extraction for the newly persisted vector record.
-      const sourceRef = `${row.collection}:${vectorId}`;
-      await enqueueEnrichmentJob(
-        row.user_id,
-        'vector',
-        sourceRef,
-        row.collection,
-        {
-          id: vectorId,
-          text: row.text,
-          collection: row.collection,
-          metadata,
-        }
-      );
+      // Skip enrichment for derived collections to prevent feedback loops
+      if (!shouldSkipEnrichment(row.collection)) {
+        const sourceRef = `${row.collection}:${vectorId}`;
+        await enqueueEnrichmentJob(
+          row.user_id,
+          'vector',
+          sourceRef,
+          row.collection,
+          {
+            id: vectorId,
+            text: row.text,
+            collection: row.collection,
+            metadata,
+          }
+        );
+      }
 
       processed++;
     } catch (error) {

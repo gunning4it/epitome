@@ -126,6 +126,44 @@ describe('write ingestion service', () => {
     expect(result.sourceRef).toBe('journal:pending:9');
   });
 
+  it('does not enqueue enrichment for graph_edges collection', async () => {
+    addVectorMock.mockResolvedValue(55);
+
+    const result = await ingestMemoryText({
+      userId: 'u1',
+      collection: 'graph_edges',
+      text: 'Josh related_to Brianna',
+      metadata: {},
+      changedBy: 'system',
+      origin: 'ai_stated',
+    });
+
+    expect(result.writeStatus).toBe('accepted');
+    expect(result.vectorId).toBe(55);
+    // Enrichment should NOT be enqueued for derived collections
+    expect(enqueueEnrichmentJobMock).not.toHaveBeenCalled();
+  });
+
+  it('does not enqueue enrichment for graph_edges in memory_backlog fallback', async () => {
+    addVectorMock.mockRejectedValue(new Error('Failed to generate embedding: OpenAI API error'));
+    enqueuePendingVectorMock.mockRejectedValue(new Error('relation "public.pending_vectors" does not exist'));
+    insertRecordMock.mockResolvedValue(88);
+
+    const result = await ingestMemoryText({
+      userId: 'u1',
+      collection: 'graph_edges',
+      text: 'Josh related_to Brianna',
+      metadata: {},
+      changedBy: 'system',
+      origin: 'ai_stated',
+    });
+
+    expect(result.writeStatus).toBe('pending_enrichment');
+    expect(result.sourceRef).toBe('memory_backlog:88');
+    // Enrichment should NOT be enqueued even in the backlog path
+    expect(enqueueEnrichmentJobMock).not.toHaveBeenCalled();
+  });
+
   it('stores memory in memory_backlog when pending queue is unavailable', async () => {
     addVectorMock.mockRejectedValue(new Error('Failed to generate embedding: OpenAI API error'));
     enqueuePendingVectorMock.mockRejectedValue(new Error('relation "public.pending_vectors" does not exist'));
