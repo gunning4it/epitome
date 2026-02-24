@@ -38,11 +38,13 @@ async function main() {
     const userId = user.id;
     const schema = user.schema_name;
 
+    // Set search_path first, then query separately
+    await pgSql.unsafe(`SET search_path TO ${schema}, public`);
+
     // Find entity names that appear under multiple types
     const duplicates = await pgSql.unsafe<
       Array<{ lower_name: string; type_count: string }>
     >(`
-      SET search_path TO ${schema}, public;
       SELECT lower(name) AS lower_name, COUNT(DISTINCT type)::text AS type_count
       FROM entities
       WHERE _deleted_at IS NULL
@@ -72,7 +74,6 @@ async function main() {
       `, [dup.lower_name]);
 
       // Recommend merge if all entities share exact same name (case-insensitive)
-      // Recommend review if names differ slightly (shouldn't happen with exact grouping, but safety)
       const uniqueNames = new Set(entities.map(e => e.name.toLowerCase()));
       const recommendation = uniqueNames.size === 1 ? 'merge' : 'review';
 
@@ -103,6 +104,8 @@ async function main() {
     console.log(JSON.stringify(report, null, 2));
   }
 
+  // Reset search_path
+  await pgSql.unsafe('SET search_path TO public');
   await closeDatabase();
   console.log('\nDone.');
 }

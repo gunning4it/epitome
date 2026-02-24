@@ -582,10 +582,10 @@ export async function mergeEntities(
         )
     `);
 
-    // Handle duplicate edges by incrementing weight
+    // Handle duplicate edges by incrementing weight (capped at 10 per CHECK constraint)
     await tx.unsafe(`
       UPDATE edges e1
-      SET weight = e1.weight + e2.weight,
+      SET weight = LEAST(e1.weight + e2.weight, 10),
           confidence = GREATEST(e1.confidence, e2.confidence),
           last_seen = NOW(),
           evidence = e1.evidence || e2.evidence
@@ -600,7 +600,7 @@ export async function mergeEntities(
 
     await tx.unsafe(`
       UPDATE edges e1
-      SET weight = e1.weight + e2.weight,
+      SET weight = LEAST(e1.weight + e2.weight, 10),
           confidence = GREATEST(e1.confidence, e2.confidence),
           last_seen = NOW(),
           evidence = e1.evidence || e2.evidence
