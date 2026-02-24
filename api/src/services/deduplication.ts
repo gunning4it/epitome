@@ -1,14 +1,16 @@
 /**
  * Deduplication Service
  *
- * 4-stage entity deduplication pipeline to prevent duplicate entities
+ * 6-stage entity deduplication pipeline to prevent duplicate entities
  * in the knowledge graph.
  *
  * Stages:
  * 1. Exact match: (type, lower(name))
+ * 1.5. Normalized match: (plural/singular)
  * 2. Fuzzy match: pg_trgm similarity > 0.6
  * 3. Alias match: Check properties.aliases array
- * 4. Context disambiguation: Use edge context to resolve ambiguity
+ * 4. Cross-type exact match (behind CROSS_TYPE_DEDUP_ENABLED flag)
+ * 5. Cross-type fuzzy → quarantine (behind CROSS_TYPE_DEDUP_ENABLED flag)
  *
  * Reference: EPITOME_TECH_SPEC.md §6.3
  * Reference: knowledge-graph SKILL.md
@@ -17,6 +19,8 @@
 import { withUserSchema } from '@/db/client';
 import { getEntityInternal, type EntityType } from './graphService';
 import { logger } from '@/utils/logger';
+import { isFeatureEnabled } from './featureFlags';
+import { insertEdgeQuarantine } from './ontology';
 
 // =====================================================
 // TYPES
@@ -30,6 +34,7 @@ export interface DuplicateMatch {
   matchType: 'exact' | 'fuzzy' | 'alias' | 'context';
   similarity?: number;
   confidence: number;
+  crossType?: boolean;
 }
 
 /**
@@ -277,7 +282,95 @@ async function findAliasMatch(
 }
 
 /**
- * Stage 4: Disambiguate using edge context
+ * Stage 4: Cross-type exact name match
+ * Finds entities with the same name but different type.
+ * Only runs when CROSS_TYPE_DEDUP_ENABLED flag is on.
+ */
+async function findCrossTypeExactMatch(
+  userId: string,
+  candidate: EntityCandidate
+): Promise<DuplicateMatch | null> {
+  return withUserSchema(userId, async (tx) => {
+    const result = await tx<{ id: number; type: string; name: string; confidence: number; mention_count: number }[]>`
+      SELECT id, type, name, confidence, mention_count
+      FROM entities
+      WHERE lower(name) = lower(${candidate.name})
+        AND type != ${candidate.type}
+        AND _deleted_at IS NULL
+      ORDER BY confidence DESC, mention_count DESC
+      LIMIT 1
+    `;
+
+    if (result.length > 0) {
+      logger.info('Cross-type exact match found', {
+        event: 'cross_type_dedup_match',
+        candidateName: candidate.name,
+        candidateType: candidate.type,
+        existingType: result[0].type,
+        entityId: result[0].id,
+      });
+      return {
+        entityId: result[0].id,
+        matchType: 'exact',
+        confidence: result[0].confidence,
+        crossType: true,
+      };
+    }
+
+    return null;
+  });
+}
+
+/**
+ * Stage 5: Cross-type fuzzy candidate → quarantine
+ * Does NOT return a DuplicateMatch. Instead inserts into edge_quarantine
+ * for human review. The entity will still be created as new.
+ */
+async function findCrossTypeFuzzyCandidate(
+  userId: string,
+  candidate: EntityCandidate
+): Promise<void> {
+  await withUserSchema(userId, async (tx) => {
+    const result = await tx<{ id: number; type: string; name: string; similarity: number }[]>`
+      SELECT id, type, name, similarity(name, ${candidate.name}) as similarity
+      FROM entities
+      WHERE type != ${candidate.type}
+        AND _deleted_at IS NULL
+        AND similarity(name, ${candidate.name}) > 0.7
+      ORDER BY similarity DESC
+      LIMIT 1
+    `;
+
+    if (result.length > 0) {
+      logger.info('Cross-type fuzzy candidate found, quarantining for review', {
+        event: 'cross_type_fuzzy_quarantine',
+        candidateName: candidate.name,
+        candidateType: candidate.type,
+        existingName: result[0].name,
+        existingType: result[0].type,
+        similarity: result[0].similarity,
+      });
+
+      await insertEdgeQuarantine(tx, {
+        sourceType: candidate.type,
+        targetType: result[0].type,
+        relation: 'cross_type_candidate',
+        sourceName: candidate.name,
+        targetName: result[0].name,
+        reason: 'cross_type_fuzzy_candidate',
+        payload: {
+          candidateType: candidate.type,
+          existingEntityId: result[0].id,
+          existingType: result[0].type,
+          similarity: result[0].similarity,
+        },
+      });
+    }
+  });
+}
+
+/**
+ * Stage 4 (context): Disambiguate using edge context
  *
  * When multiple entities have similar names (e.g., two "Sarah"s),
  * resolve using connected entities and relations.
@@ -399,6 +492,18 @@ export async function findDuplicateEntity(
   const aliasMatch = await findAliasMatch(userId, candidate);
   if (aliasMatch) {
     return aliasMatch;
+  }
+
+  // Stages 4-5: Cross-type matching (behind feature flag)
+  if (isFeatureEnabled('CROSS_TYPE_DEDUP_ENABLED')) {
+    // Stage 4: Cross-type exact match
+    const crossTypeExact = await findCrossTypeExactMatch(userId, candidate);
+    if (crossTypeExact) {
+      return crossTypeExact;
+    }
+
+    // Stage 5: Cross-type fuzzy → quarantine (does not return a match)
+    await findCrossTypeFuzzyCandidate(userId, candidate);
   }
 
   // No duplicate found
@@ -563,12 +668,22 @@ export async function mergeEntities(
 export async function checkAndDeduplicateBeforeCreate(
   userId: string,
   candidate: EntityCandidate
-): Promise<number | null> {
+): Promise<number | null>;
+export async function checkAndDeduplicateBeforeCreate(
+  userId: string,
+  candidate: EntityCandidate,
+  returnMatch: true
+): Promise<DuplicateMatch | null>;
+export async function checkAndDeduplicateBeforeCreate(
+  userId: string,
+  candidate: EntityCandidate,
+  returnMatch?: boolean
+): Promise<number | DuplicateMatch | null> {
   const duplicate = await findDuplicateEntity(userId, candidate);
 
   if (duplicate) {
     logger.info('Found duplicate entity', { matchType: duplicate.matchType, candidateName: candidate.name, existingEntityId: duplicate.entityId });
-    return duplicate.entityId;
+    return returnMatch ? duplicate : duplicate.entityId;
   }
 
   return null;

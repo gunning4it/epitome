@@ -161,7 +161,8 @@ export function useGraphEntities(params?: Record<string, string | number | boole
   return useQuery({
     queryKey: ['graph', 'entities', params],
     queryFn: () => graphApi.entities(params),
-    refetchInterval: 30_000,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 

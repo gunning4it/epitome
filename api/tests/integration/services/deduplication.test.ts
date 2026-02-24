@@ -566,3 +566,134 @@ describe('checkAndDeduplicateBeforeCreate', () => {
     expect(duplicateId).toBeNull();
   });
 });
+
+// =====================================================
+// CROSS-TYPE DEDUP TESTS
+// =====================================================
+
+describe('Cross-type deduplication (Stages 4-5)', () => {
+  beforeEach(async () => {
+    // Enable the feature flag for these tests
+    process.env.CROSS_TYPE_DEDUP_ENABLED = 'true';
+  });
+
+  afterEach(() => {
+    delete process.env.CROSS_TYPE_DEDUP_ENABLED;
+  });
+
+  it('should find cross-type exact match when flag is enabled', async () => {
+    // Create "Gunning family" as custom type
+    const existing = await createEntity(TEST_USER_ID, {
+      name: 'Gunning family',
+      type: 'custom',
+      properties: {},
+      origin: 'user_stated',
+    });
+
+    // Search for same name but different type
+    const candidate: EntityCandidate = {
+      type: 'person',
+      name: 'Gunning family',
+    };
+
+    const duplicate = await findDuplicateEntity(TEST_USER_ID, candidate);
+
+    expect(duplicate).not.toBeNull();
+    expect(duplicate?.entityId).toBe(existing.id);
+    expect(duplicate?.crossType).toBe(true);
+  });
+
+  it('should prefer same-type match over cross-type', async () => {
+    // Create "Gunning family" as custom AND person
+    const customEntity = await createEntity(TEST_USER_ID, {
+      name: 'Gunning family',
+      type: 'custom',
+      properties: {},
+      origin: 'user_stated',
+    });
+
+    const personEntity = await createEntity(TEST_USER_ID, {
+      name: 'Gunning family',
+      type: 'person',
+      properties: {},
+      origin: 'user_stated',
+    });
+
+    // Search for person type — should match same-type first
+    const candidate: EntityCandidate = {
+      type: 'person',
+      name: 'Gunning family',
+    };
+
+    const duplicate = await findDuplicateEntity(TEST_USER_ID, candidate);
+
+    expect(duplicate).not.toBeNull();
+    expect(duplicate?.entityId).toBe(personEntity.id);
+    expect(duplicate?.crossType).toBeUndefined(); // Same-type match, not cross-type
+  });
+
+  it('should skip cross-type stages when flag is disabled', async () => {
+    delete process.env.CROSS_TYPE_DEDUP_ENABLED;
+
+    await createEntity(TEST_USER_ID, {
+      name: 'Gunning family',
+      type: 'custom',
+      properties: {},
+      origin: 'user_stated',
+    });
+
+    const candidate: EntityCandidate = {
+      type: 'person',
+      name: 'Gunning family',
+    };
+
+    const duplicate = await findDuplicateEntity(TEST_USER_ID, candidate);
+
+    // Should NOT find a match because cross-type is disabled
+    expect(duplicate).toBeNull();
+  });
+
+  it('should quarantine cross-type fuzzy candidates instead of auto-merging', async () => {
+    // Create edge_quarantine table in test schema
+    await pgSql.unsafe(`SET search_path TO ${TEST_SCHEMA}, public`);
+    await pgSql.unsafe(`
+      CREATE TABLE IF NOT EXISTS edge_quarantine (
+        id SERIAL PRIMARY KEY,
+        source_type VARCHAR(50),
+        target_type VARCHAR(50),
+        relation VARCHAR(100),
+        source_name VARCHAR(500),
+        target_name VARCHAR(500),
+        reason VARCHAR(200),
+        payload JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Use names with high pg_trgm similarity (>0.7) but not exact
+    await createEntity(TEST_USER_ID, {
+      name: 'Gunning Mills',
+      type: 'person',
+      properties: {},
+      origin: 'user_stated',
+    });
+
+    // Search for fuzzy cross-type match ("Gunning Mill" vs "Gunning Mills" ~ 0.8 similarity)
+    const candidate: EntityCandidate = {
+      type: 'topic',
+      name: 'Gunning Mill',
+    };
+
+    const duplicate = await findDuplicateEntity(TEST_USER_ID, candidate);
+
+    // Fuzzy cross-type should NOT auto-merge
+    expect(duplicate).toBeNull();
+
+    // But should have quarantine entry
+    await pgSql.unsafe(`SET search_path TO ${TEST_SCHEMA}, public`);
+    const quarantine = await pgSql.unsafe(`SELECT * FROM edge_quarantine WHERE reason = 'cross_type_fuzzy_candidate'`);
+    expect(quarantine.length).toBeGreaterThanOrEqual(1);
+    expect(quarantine[0].source_name).toBe('Gunning Mill');
+    expect(quarantine[0].target_name).toBe('Gunning Mills');
+  });
+});

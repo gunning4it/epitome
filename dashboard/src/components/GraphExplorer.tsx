@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3';
 import { ENTITY_DISPLAY, type EntityType } from '@/lib/ontology';
 import type { Entity, Edge } from '@/lib/types';
@@ -19,6 +19,7 @@ interface D3Node extends d3.SimulationNodeDatum {
 }
 
 interface D3Link extends d3.SimulationLinkDatum<D3Node> {
+  id: string;
   relation: string;
   weight: number;
 }
@@ -41,6 +42,12 @@ const RELATION_COLORS: Record<string, string> = {
   default: '#9ca3af',
 };
 
+const MAX_BUBBLE_RADIUS = 60;
+
+function nodeRadius(d: D3Node): number {
+  return Math.min(Math.sqrt(d.mention_count) * 5 + 20, MAX_BUBBLE_RADIUS);
+}
+
 export default function GraphExplorer({
   nodes,
   edges,
@@ -50,41 +57,121 @@ export default function GraphExplorer({
   const svgRef = useRef<SVGSVGElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
-  useEffect(() => {
-    if (!svgRef.current || !nodes.length) return;
+  // Persistent refs across renders
+  const simulationRef = useRef<d3.Simulation<D3Node, D3Link> | null>(null);
+  const zoomTransformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
+  const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const linkGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const nodeGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const labelGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const initializedRef = useRef(false);
+  const onNodeClickRef = useRef(onNodeClick);
+  onNodeClickRef.current = onNodeClick;
 
-    // Clear previous graph
-    d3.select(svgRef.current).selectAll('*').remove();
+  // ── Init effect: runs once to create SVG structure, zoom, simulation ──
+  useEffect(() => {
+    if (!svgRef.current) return;
 
     const svg = d3.select(svgRef.current);
-    const width = dimensions.width;
-    const height = dimensions.height;
+    svg.selectAll('*').remove();
 
     // Create zoom behavior
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 5])
       .on('zoom', (event) => {
-        g.attr('transform', event.transform);
+        gRef.current?.attr('transform', event.transform);
+        zoomTransformRef.current = event.transform;
       });
 
     svg.call(zoom);
+    zoomBehaviorRef.current = zoom;
 
-    // Create main group
+    // Create persistent SVG groups
     const g = svg.append('g');
+    gRef.current = g;
+    linkGroupRef.current = g.append('g').attr('class', 'links');
+    nodeGroupRef.current = g.append('g').attr('class', 'nodes');
+    labelGroupRef.current = g.append('g').attr('class', 'labels');
 
-    // Convert to D3 format
-    const d3Nodes: D3Node[] = nodes.map((node) => ({
-      id: String(node.id),
-      name: node.name,
-      type: node.type,
-      mention_count: node.mention_count,
-      confidence: node.confidence,
-    }));
+    // Create simulation (empty initially)
+    const simulation = d3
+      .forceSimulation<D3Node>([])
+      .force('charge', d3.forceManyBody().strength(-400))
+      .force('collision', d3.forceCollide<D3Node>().radius((d) => nodeRadius(d)))
+      .alphaDecay(0.02)
+      .on('tick', tick);
 
-    // Keep link endpoints aligned with the current node payload to avoid D3 "node not found" crashes.
-    const nodeIds = new Set(d3Nodes.map((node) => node.id));
+    simulationRef.current = simulation;
+    initializedRef.current = true;
+
+    function tick() {
+      linkGroupRef.current
+        ?.selectAll<SVGLineElement, D3Link>('line')
+        .attr('x1', (d) => (d.source as D3Node).x ?? 0)
+        .attr('y1', (d) => (d.source as D3Node).y ?? 0)
+        .attr('x2', (d) => (d.target as D3Node).x ?? 0)
+        .attr('y2', (d) => (d.target as D3Node).y ?? 0);
+
+      nodeGroupRef.current
+        ?.selectAll<SVGCircleElement, D3Node>('circle')
+        .attr('cx', (d) => d.x ?? 0)
+        .attr('cy', (d) => d.y ?? 0);
+
+      labelGroupRef.current
+        ?.selectAll<SVGTextElement, D3Node>('text')
+        .attr('x', (d) => d.x ?? 0)
+        .attr('y', (d) => d.y ?? 0);
+    }
+
+    return () => {
+      simulation.stop();
+      simulationRef.current = null;
+      initializedRef.current = false;
+    };
+  }, []); // Init only once
+
+  // ── Data update effect: incremental D3 join on data changes ──
+  useEffect(() => {
+    if (!initializedRef.current || !simulationRef.current || !svgRef.current) return;
+
+    const simulation = simulationRef.current;
+    const width = dimensions.width;
+    const height = dimensions.height;
+
+    // Update center force with current dimensions
+    simulation.force('center', d3.forceCenter(width / 2, height / 2));
+
+    // Build D3 data, preserving positions from running simulation nodes
+    const existingNodeMap = new Map<string, D3Node>();
+    for (const n of simulation.nodes()) {
+      existingNodeMap.set(n.id, n);
+    }
+
+    const d3Nodes: D3Node[] = nodes.map((node) => {
+      const id = String(node.id);
+      const existing = existingNodeMap.get(id);
+      if (existing) {
+        // Update mutable fields but keep position
+        existing.name = node.name;
+        existing.type = node.type;
+        existing.mention_count = node.mention_count;
+        existing.confidence = node.confidence;
+        return existing;
+      }
+      return {
+        id,
+        name: node.name,
+        type: node.type,
+        mention_count: node.mention_count,
+        confidence: node.confidence,
+      };
+    });
+
+    const nodeIds = new Set(d3Nodes.map((n) => n.id));
     const d3Links: D3Link[] = edges
       .map((edge) => ({
+        id: `${edge.source_id}-${edge.target_id}-${edge.relation}`,
         source: String(edge.source_id),
         target: String(edge.target_id),
         relation: edge.relation,
@@ -92,50 +179,66 @@ export default function GraphExplorer({
       }))
       .filter((edge) => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)));
 
-    // Create force simulation
-    const simulation = d3
-      .forceSimulation<D3Node>(d3Nodes)
-      .force(
-        'link',
-        d3
-          .forceLink<D3Node, D3Link>(d3Links)
-          .id((d) => d.id)
-          .distance(150)
-      )
-      .force('charge', d3.forceManyBody().strength(-400))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force(
-        'collision',
-        d3.forceCollide<D3Node>().radius((d) => Math.sqrt(d.mention_count) * 5 + 20)
+    // ── Links: enter / update / exit ──
+    linkGroupRef.current!
+      .selectAll<SVGLineElement, D3Link>('line')
+      .data(d3Links, (d) => d.id)
+      .join(
+        (enter) =>
+          enter
+            .append('line')
+            .attr('stroke', (d) => RELATION_COLORS[d.relation] || RELATION_COLORS.default)
+            .attr('stroke-width', (d) => Math.sqrt(d.weight) * 2)
+            .attr('stroke-opacity', 0)
+            .call((sel) => sel.transition().duration(300).attr('stroke-opacity', 0.4)),
+        (update) =>
+          update
+            .attr('stroke', (d) => RELATION_COLORS[d.relation] || RELATION_COLORS.default)
+            .attr('stroke-width', (d) => Math.sqrt(d.weight) * 2),
+        (exit) =>
+          exit.transition().duration(300).attr('stroke-opacity', 0).remove()
       );
 
-    // Draw edges
-    const link = g
-      .append('g')
-      .selectAll('line')
-      .data(d3Links)
-      .join('line')
-      .attr('stroke', (d) => RELATION_COLORS[d.relation] || RELATION_COLORS.default)
-      .attr('stroke-width', (d) => Math.sqrt(d.weight) * 2)
-      .attr('stroke-opacity', 0.4);
+    // ── Nodes: enter / update / exit ──
+    const nodeSelection = nodeGroupRef.current!
+      .selectAll<SVGCircleElement, D3Node>('circle')
+      .data(d3Nodes, (d) => d.id)
+      .join(
+        (enter) => {
+          const circles = enter
+            .append('circle')
+            .attr('r', 0)
+            .attr('fill', (d) => ENTITY_COLORS[d.type] || ENTITY_COLORS.default)
+            .attr('stroke', '#27272a')
+            .attr('stroke-width', 2)
+            .style('cursor', 'pointer')
+            .attr('cx', (d) => d.x ?? width / 2)
+            .attr('cy', (d) => d.y ?? height / 2);
 
-    // Draw nodes
-    const node = g
-      .append('g')
-      .selectAll('circle')
-      .data(d3Nodes)
-      .join('circle')
-      .attr('r', (d) => Math.sqrt(d.mention_count) * 5 + 20)
-      .attr('fill', (d) => ENTITY_COLORS[d.type] || ENTITY_COLORS.default)
-      .attr('stroke', '#27272a')
-      .attr('stroke-width', 2)
-      .attr('opacity', (d) => {
-        if (!searchQuery) return 1;
-        return d.name.toLowerCase().includes(searchQuery.toLowerCase()) ? 1 : 0.3;
-      })
-      .style('cursor', 'pointer');
+          circles
+            .transition()
+            .duration(400)
+            .attr('r', (d) => nodeRadius(d));
 
-    // Add drag behavior
+          return circles;
+        },
+        (update) =>
+          update
+            .attr('fill', (d) => ENTITY_COLORS[d.type] || ENTITY_COLORS.default)
+            .call((sel) =>
+              sel.transition().duration(300).attr('r', (d) => nodeRadius(d))
+            ),
+        (exit) =>
+          exit.transition().duration(300).attr('r', 0).attr('opacity', 0).remove()
+      );
+
+    // Search opacity
+    nodeSelection.attr('opacity', (d) => {
+      if (!searchQuery) return 1;
+      return d.name.toLowerCase().includes(searchQuery.toLowerCase()) ? 1 : 0.3;
+    });
+
+    // Drag behavior
     const dragHandler = d3
       .drag<SVGCircleElement, D3Node>()
       .on('start', (event, d) => {
@@ -151,58 +254,71 @@ export default function GraphExplorer({
         if (!event.active) simulation.alphaTarget(0);
       });
 
-    dragHandler(node as d3.Selection<SVGCircleElement, D3Node, SVGGElement, unknown>);
+    dragHandler(nodeSelection);
 
-    // Add click handler — pin node in place to prevent drift
-    node.on('click', (_event, d) => {
+    // Click to pin + select
+    nodeSelection.on('click', (_event, d) => {
       d.fx = d.x;
       d.fy = d.y;
-      if (onNodeClick) {
+      if (onNodeClickRef.current) {
         const originalNode = nodes.find((n) => String(n.id) === d.id);
-        if (originalNode) onNodeClick(originalNode);
+        if (originalNode) onNodeClickRef.current(originalNode);
       }
     });
 
-    // Double-click to unpin node
-    node.on('dblclick', (_event, d) => {
+    // Double-click to unpin
+    nodeSelection.on('dblclick', (_event, d) => {
       d.fx = null;
       d.fy = null;
     });
 
-    // Add labels
-    const label = g
-      .append('g')
-      .selectAll('text')
-      .data(d3Nodes)
-      .join('text')
-      .text((d) => d.name)
-      .attr('fill', '#fafafa')
-      .attr('font-family', 'Inter Variable, sans-serif')
-      .attr('font-size', 11)
-      .attr('dx', (d) => Math.sqrt(d.mention_count) * 5 + 25)
-      .attr('dy', 4)
-      .attr('opacity', 1)
-      .style('pointer-events', 'none');
+    // ── Labels: enter / update / exit ──
+    labelGroupRef.current!
+      .selectAll<SVGTextElement, D3Node>('text')
+      .data(d3Nodes, (d) => d.id)
+      .join(
+        (enter) =>
+          enter
+            .append('text')
+            .text((d) => d.name)
+            .attr('fill', '#fafafa')
+            .attr('font-family', 'Inter Variable, sans-serif')
+            .attr('font-size', 11)
+            .attr('dx', (d) => nodeRadius(d) + 5)
+            .attr('dy', 4)
+            .attr('opacity', 0)
+            .style('pointer-events', 'none')
+            .call((sel) => sel.transition().duration(400).attr('opacity', 1)),
+        (update) =>
+          update
+            .text((d) => d.name)
+            .attr('dx', (d) => nodeRadius(d) + 5),
+        (exit) =>
+          exit.transition().duration(300).attr('opacity', 0).remove()
+      );
 
-    // Update positions on tick
-    simulation.on('tick', () => {
-      link
-        .attr('x1', (d) => (d.source as D3Node).x ?? 0)
-        .attr('y1', (d) => (d.source as D3Node).y ?? 0)
-        .attr('x2', (d) => (d.target as D3Node).x ?? 0)
-        .attr('y2', (d) => (d.target as D3Node).y ?? 0);
+    // ── Update simulation ──
+    simulation.nodes(d3Nodes);
+    simulation.force(
+      'link',
+      d3
+        .forceLink<D3Node, D3Link>(d3Links)
+        .id((d) => d.id)
+        .distance(150)
+    );
 
-      node.attr('cx', (d) => d.x ?? 0).attr('cy', (d) => d.y ?? 0);
+    // Mild reheat — existing nodes stay roughly in place, new nodes find their spot
+    const hasNewNodes = d3Nodes.some((n) => n.x === undefined);
+    simulation.alpha(hasNewNodes ? 0.5 : 0.3).restart();
 
-      label.attr('x', (d) => d.x ?? 0).attr('y', (d) => d.y ?? 0);
-    });
+    // Restore zoom transform
+    if (zoomBehaviorRef.current && zoomTransformRef.current !== d3.zoomIdentity) {
+      const svg = d3.select(svgRef.current);
+      svg.call(zoomBehaviorRef.current.transform, zoomTransformRef.current);
+    }
+  }, [nodes, edges, dimensions, searchQuery]);
 
-    return () => {
-      simulation.stop();
-    };
-  }, [nodes, edges, dimensions, searchQuery, onNodeClick]);
-
-  // Handle window resize
+  // ── Resize observer ──
   useEffect(() => {
     const handleResize = () => {
       if (svgRef.current) {

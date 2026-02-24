@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Network, X } from 'lucide-react';
+import { Network, X, RefreshCw } from 'lucide-react';
 import {
   useGraphEntities,
   useEntityNeighbors,
@@ -16,6 +16,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { ENTITY_DISPLAY, type EntityType } from '@/lib/ontology';
 import type { Entity, Edge } from '@/lib/types';
+import { useQueryClient } from '@tanstack/react-query';
 
 const ENTITY_LEGEND = (Object.entries(ENTITY_DISPLAY) as [EntityType, { label: string; color: string }][]).map(
   ([type, config]) => ({ type, label: config.label, color: config.color })
@@ -38,6 +39,7 @@ export default function Graph() {
   const updateEntity = useUpdateEntity();
   const mergeEntities = useMergeEntities();
   const deleteEntity = useDeleteEntity();
+  const queryClient = useQueryClient();
 
   const { data: neighborsData } = useEntityNeighbors(selectedEntity?.id || '');
 
@@ -152,6 +154,14 @@ export default function Graph() {
               onClick={() => setIncludeDisconnected((prev) => !prev)}
             >
               Disconnected {includeDisconnected ? 'shown' : 'hidden'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['graph'] })}
+              title="Refresh graph"
+            >
+              <RefreshCw className="size-4" />
             </Button>
             <Input
               type="text"

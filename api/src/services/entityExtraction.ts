@@ -14,6 +14,8 @@ import { withUserSchema, sql as pgSql } from '@/db/client';
 import { createEntity, createEdge, getEntityByName, type CreateEntityInput, type CreateEdgeInput } from './graphService';
 import { ENTITY_TYPES, EDGE_RELATIONS, type EntityType } from './ontology';
 import { checkAndDeduplicateBeforeCreate, type EntityCandidate } from './deduplication';
+import { isFeatureEnabled } from './featureFlags';
+import { extractTemporalFromText } from './temporalExtraction';
 import { getLatestProfile } from './profile.service';
 import { softCheckLimit } from './metering.service';
 import { syncEntityToProfile } from './profileSync.service';
@@ -320,7 +322,7 @@ ${entityLines}`;
   prompt += `
 
 ## Rules & Extensibility
-1. TEMPORAL: Resolve ALL relative dates to ISO strings. "next month" → "${context.nextMonth}", "yesterday" → "${context.yesterday}", "last Tuesday" → compute from today. Store resolved dates in properties.
+1. TEMPORAL: Resolve ALL relative dates to ISO strings. "next month" → "${context.nextMonth}", "yesterday" → "${context.yesterday}", "last Tuesday" → compute from today. Store resolved dates in properties as event_date (YYYY-MM-DD) and event_precision ("day", "month", "year", or "approx").
 2. DISAMBIGUATION: When a name matches or is close to a known entity, use that exact name and type to avoid duplicates.
 3. ENTITY-TO-ENTITY: By default, edges originate from the User. Use \`sourceRef\` when a relationship, action, or attribute belongs to a NON-USER entity (a third-party person, organization, object, or event).
 4. UNKNOWN TYPES: If an entity does not cleanly fit standard types (${[...ENTITY_TYPES].filter(t => t !== 'custom').join(', ')}), assign it type "custom" and specify its real category in \`properties: { category: "..." }\` (e.g., "vehicle", "software", "pet", "device").
@@ -1353,7 +1355,14 @@ Extract entities and relationships:`;
                     properties: {
                       name: { type: 'string' },
                       type: { type: 'string', enum: [...ENTITY_TYPES] },
-                      properties: { type: 'object', additionalProperties: false },
+                      properties: {
+                        type: 'object',
+                        properties: {
+                          event_date: { type: 'string', description: 'ISO date YYYY-MM-DD if temporal reference found' },
+                          event_precision: { type: 'string', enum: ['day', 'month', 'year', 'approx'] },
+                        },
+                        additionalProperties: true,
+                      },
                       edge: {
                         type: ['object', 'null'],
                         properties: {
@@ -1969,6 +1978,23 @@ export async function extractEntitiesFromRecord(
 
   entities = sanitizeExtractedEntities(entities);
 
+  // Temporal enrichment (behind feature flag)
+  if (isFeatureEnabled('TEMPORAL_EXTRACTION_ENABLED')) {
+    const textContent = record.text || record.content || record.note || record.entry;
+    if (typeof textContent === 'string') {
+      const temporal = extractTemporalFromText(textContent);
+      if (temporal) {
+        for (const entity of entities) {
+          if (!entity.properties) entity.properties = {};
+          if (!entity.properties.event_date) {
+            entity.properties.event_date = temporal.date;
+            entity.properties.event_precision = temporal.precision;
+          }
+        }
+      }
+    }
+  }
+
   // Soft limit check for graph entities (skip extraction if over limit, don't fail the write)
   if (tier) {
     const { exceeded, current, limit } = await softCheckLimit(userId, tier, 'graphEntities');
@@ -2018,7 +2044,8 @@ export async function extractEntitiesFromRecord(
       };
 
       // Check if entity already exists (deduplication)
-      const existingEntityId = await checkAndDeduplicateBeforeCreate(userId, candidate);
+      const dedupMatch = await checkAndDeduplicateBeforeCreate(userId, candidate, true);
+      const existingEntityId = dedupMatch?.entityId ?? null;
 
       let entityId: number;
       let createdEntity;
@@ -2026,15 +2053,70 @@ export async function extractEntitiesFromRecord(
       if (existingEntityId) {
         // Use existing entity
         entityId = existingEntityId;
-        // Entity already exists, just increment mention count
-        await withUserSchema(userId, async (tx) => {
-          await tx.unsafe(`
-            UPDATE entities
-            SET mention_count = mention_count + 1,
-                last_seen = NOW()
-            WHERE id = ${existingEntityId}
-          `);
+        // Idempotency guard: skip mention_count bump if this source was already processed
+        const sourceRef = `${tableName}:${record.id}`;
+        const alreadyProcessed = await withUserSchema(userId, async (tx) => {
+          const evidenceJson = JSON.stringify([{ table: tableName, row_id: record.id }]);
+          const rows = await tx`
+            SELECT 1 FROM edges
+            WHERE (source_id = ${existingEntityId} OR target_id = ${existingEntityId})
+              AND _deleted_at IS NULL
+              AND evidence @> ${evidenceJson}::jsonb
+            LIMIT 1
+          `;
+          return rows.length > 0;
         });
+        if (!alreadyProcessed) {
+          await withUserSchema(userId, async (tx) => {
+            await tx.unsafe(`
+              UPDATE entities
+              SET mention_count = mention_count + 1,
+                  last_seen = NOW()
+              WHERE id = ${existingEntityId}
+            `);
+          });
+        } else {
+          logger.info('Skipping mention_count increment (already processed)', {
+            entityId: existingEntityId,
+            sourceRef,
+          });
+        }
+        // Type promotion for cross-type dedup matches
+        if (dedupMatch?.crossType && isFeatureEnabled('CROSS_TYPE_DEDUP_ENABLED')) {
+          const SPECIFICITY: Record<string, number> = {
+            person: 10, organization: 10, place: 10, food: 10, medication: 10, media: 10,
+            event: 9, activity: 9,
+            preference: 5,
+            topic: 3,
+            custom: 1,
+          };
+          const candidateSpecificity = SPECIFICITY[extracted.type] ?? 0;
+
+          // We need the existing entity's type. Query for it.
+          const existingEntity = await withUserSchema(userId, async (tx) => {
+            const rows = await tx<{ type: string; confidence: number }[]>`
+              SELECT type, confidence FROM entities WHERE id = ${existingEntityId} AND _deleted_at IS NULL LIMIT 1
+            `;
+            return rows[0] as { type: string; confidence: number } | undefined;
+          });
+
+          if (existingEntity) {
+            const existingTypeSpecificity = SPECIFICITY[existingEntity.type] ?? 0;
+            if (candidateSpecificity > existingTypeSpecificity && existingEntity.confidence < 0.8) {
+              await withUserSchema(userId, async (tx) => {
+                await tx`
+                  UPDATE entities SET type = ${extracted.type} WHERE id = ${existingEntityId}
+                `;
+              });
+              logger.info('Type promotion applied', {
+                event: 'type_promotion',
+                entityId: existingEntityId,
+                from: existingEntity.type,
+                to: extracted.type,
+              });
+            }
+          }
+        }
         createdEntity = { id: entityId };
       } else {
         // Create new entity
