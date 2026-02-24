@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { ENTITY_DISPLAY, type EntityType } from '@/lib/ontology';
 import type { Entity, Edge } from '@/lib/types';
